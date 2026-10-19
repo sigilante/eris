@@ -19,6 +19,23 @@ Entry format:
 
 ---
 
+## 2026-10-19 — King build + orchestrator (no vere patch)
+- **Scope:** king / build
+- **Upstream touched:** none — vere is used stock
+- **Mechanism:** new code (`justfile`); build flags only
+- **What:** King is built as `eris` from stock vere with `zig build -Drelease
+  -Dbinary-name=eris` (Zig 0.15.2). The serf is spawned via vere's **existing**
+  `--serf-bin` flag (`main.c` opt 11 → `wrk_c`, used as `arg[0]`+`file` at both
+  `lord.c` spawn sites), so **no vere patch is needed**; `mars.c` stays compiled
+  but unused. Added a `justfile` (apply / serf / king / build / dev). Recorded
+  the king→serf invocation argv as the "invocation contract" in
+  `docs/seam-contract.md`.
+- **Why:** Vere already separates the worker-binary path; exploiting it keeps
+  `patches/vere/` empty (minimal divergence). The compatibility burden moves to
+  the serf, which must accept vere's spawn CLI.
+- **Re-apply risk:** none (no patch). On a vere bump, re-check that `--serf-bin`,
+  `-Dbinary-name`, and the spawn argv (invocation contract) are unchanged.
+
 ## 2026-10-19 — Serf build: isolate nockvm from the monorepo
 - **Scope:** serf / build
 - **Upstream touched:** nockchain@`73877be2` — adds (does not edit)
@@ -48,21 +65,3 @@ Entry format:
   pinned upstreams, all divergence as patches or Eris-owned overlays.
 - **Re-apply risk:** none yet (no patches).
 
-<!-- Planned first divergences (not yet implemented), for orientation:
-
-## (planned) — King spawns the Rust serf
-- **Scope:** king
-- **Upstream touched:** vere pkg/vere/lord.c (serf spawn path, ~lord.c:1027-1046
-  / :1292-1308 where argv "work"/"boot" is built for re-exec of argv[0])
-- **Mechanism:** patch (patches/vere/0001-spawn-eris-serf.patch)
-- **What:** Replace the self-re-exec with a spawn of the Eris serf binary.
-- **Why:** The mars process is now the Rust serf, not vere's mars.c.
-- **Re-apply risk:** lord.c spawn code is stable but the argv/flags
-  (`--snap-dir`, `--loom`, `--runtime-config`, `--lmdb-map-size`) evolve; verify
-  flag set on each bump.
-
-## (planned) — Drop mars.c from the king build
-- **Scope:** build
-- **Mechanism:** build config (Eris build omits pkg/vere/mars.c)
-- **Why:** vere's serf is replaced; keep its king objects, drop the serf.
--->

@@ -1,15 +1,15 @@
 # king/ — Eris-owned C over the urth (vere)
 
-The king is Vere's, taken pristine from `third_party/vere`. This directory holds
-**only Eris's own C** that sits on top of it:
+The king is Vere's, taken **stock** from `third_party/vere` — and it turns out
+it needs no patch at all. Vere already exposes the worker-binary path as the
+`--serf-bin` flag (`main.c` opt 11 → `u3_Host.wrk_c`, used as both `arg[0]` and
+the spawn `file` at the run/boot spawn sites in `lord.c`). Eris just points it at
+`eris-serf`. `pkg/vere/mars.c` (vere's own serf) stays compiled but unused.
 
-- the build entry that compiles vere's king objects (`pkg/{c3,ent,ur,noun}` and
-  the king half of `pkg/vere`) while **omitting `pkg/vere/mars.c`** (vere's own
-  serf, which the Rust serf replaces);
-- any small glue the king needs to launch and supervise the Rust serf.
+Build: `just king` → `zig build -Drelease -Dbinary-name=eris` in the submodule
+(no rename patch either — binary name is a build option). Output:
+`third_party/vere/zig-out/<triple>/eris`.
 
-Edits to vere source files themselves do **not** live here — they go in
-`patches/vere/` (see `patches/README.md`). The single expected upstream edit is
-the serf-spawn redirect in `pkg/vere/lord.c`.
-
-Empty for now; populated when the build system is settled.
+So this directory is **reserved** — currently nothing Eris-owned is needed on the
+king side. Any future Eris C glue would live here; any unavoidable vere source
+edit would live in `patches/vere/` (see `patches/README.md`), which is empty.

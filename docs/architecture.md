@@ -30,7 +30,7 @@ talk over the frozen newt seam (`seam-contract.md`).
 | Concern                         | Owner | Notes |
 |---------------------------------|-------|-------|
 | IO / networking / timers / term | king  | Vere's battle-tested drivers, unchanged |
-| Process supervision, spawn      | king  | spawns the Rust serf (the one king patch) |
+| Process supervision, spawn      | king  | spawns the Rust serf via stock `--serf-bin` (no patch) |
 | newt IPC framing + protocol     | both  | contract frozen in `seam-contract.md` |
 | Nock 0–12 execution             | serf  | nockvm interpreter |
 | Jets (`%fast` dashboard)        | serf  | **must be re-pinned to Arvo's kelvin** |
@@ -75,11 +75,14 @@ talk over the frozen newt seam (`seam-contract.md`).
 
 - `third_party/vere` — pristine king upstream (pinned submodule).
 - `third_party/nockchain` — pristine serf upstream (pinned submodule).
-- `king/` — Eris-owned C glue over vere (spawn redirect, build entry).
+- `king/` — reserved for Eris-owned C glue over vere; currently none needed (the
+  king is stock vere, driven by its own `--serf-bin` flag; `mars.c` stays
+  compiled but unused). Built as `eris` via `-Dbinary-name` — no patch.
 - `serf/` — Eris-owned Rust serf crate (newt shim + Serf over nockvm).
 - `patches/` — re-appliable divergences from the pinned upstreams.
 - `docs/seam-contract.md` — the frozen king↔serf interface.
 - `PROVENANCE.md` / `CHANGES.md` — where code comes from / what we changed.
 
-Build system is intentionally not decided yet (vere is Zig+Bazel, nockchain is
-Cargo+Bazel) — see the open discussion.
+Build: two independent artifacts (serf via Cargo, king via vere's Zig build)
+wired by a `justfile`; the king is stock vere driven by `--serf-bin`. See
+`docs/build.md`.

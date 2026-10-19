@@ -15,8 +15,10 @@ Source of truth in the submodule: `third_party/vere/pkg/vere/{newt.c,mars.c,lord
 ## Process & transport
 
 - The king spawns the serf as a child with `argv[1] = "work"` (run/resume) or
-  `"boot"` (bootstrap). In stock vere this is a re-exec of `argv[0]`; **Eris
-  redirects it to spawn the Rust serf binary** (the sole king-side patch).
+  `"boot"` (bootstrap). Stock vere re-execs `argv[0]`; Eris points the king's
+  **stock `--serf-bin` flag** at `eris-serf` (no king patch — `wrk_c` is used as
+  both `arg[0]` and the spawn `file`, `lord.c:993,1083`/`:1260,1335`). The exact
+  argv the king builds is the **invocation contract** below.
 - Three stdio pipes: **fd0** king→serf (writ), **fd1** serf→king (plea),
   **fd2** serf stderr (forwarded).
 - **Framing** (`newt.c`): each message = 5-byte header + body.
@@ -25,6 +27,34 @@ Source of truth in the submodule: `third_party/vere/pkg/vere/{newt.c,mars.c,lord
     capped at 4 GiB; reject len == 0).
   - `body` = the **`+jam` of a noun**. Send = `u3s_jam_xeno`; receive =
     `u3s_cue_xeno_with`.
+
+## Invocation contract (how the king launches the serf)
+
+Before any newt traffic, the king execs the serf binary (`--serf-bin`) with a
+fixed argv. `eris-serf` must accept this exact CLI — interpreting each flag or
+ignoring it harmlessly — or it dies before the handshake. Built by
+`lord.c:1024-1060` (run) and `:1289-1320` (boot).
+
+```
+eris-serf  work|boot
+           --snap-dir <pier>/.urb/chk        # checkpoint/snapshot directory
+           --runtime-config <wag>            # runtime config word
+           --temporary-cache-size <hap>      # memo/hash table size
+           --loom <bex>                      # loom size, power of two (vere's arena)
+           --toss <w>                        # toss
+           --persistent-cache-size <per>
+           --snap-time <sap>                 # snapshot interval
+           --lmdb-map-size <siz>             # event-log map size
+           [--play-until <eve>]              # optional
+           [--ephemeral-file <path>]         # optional
+           [--win-intr-handle <h>]           # Windows only
+```
+
+Mapping to the Eris serf (nockvm + PMA + SQLite): `--snap-dir` is where PMA /
+snapshots live; `--loom` sizes the NockStack arena (vere counts it in bits);
+`--lmdb-map-size` is moot for the SQLite log and may be ignored; the cache-size
+and `--snap-time` flags tune nockvm's caches / snapshot cadence. `work` resumes
+(self-replays its log), `boot` bootstraps from a `%boot` writ.
 
 ## Writs (king → serf)
 

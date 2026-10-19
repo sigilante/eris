@@ -46,42 +46,65 @@ Build order for the serf: `patches/apply.sh nockchain` **must run before**
 `cargo build` in `serf/`, or the standalone manifest isn't present and Cargo
 falls back to the monorepo root.
 
-## King (C via Zig) — TODO
+## King (C via Zig) — DONE: stock vere, NO patch needed
 
-Decisions (owner): reuse vere's own `build.zig`; `--serf-bin` flag; pin Zig.
+The headline finding: **vere already has the worker-binary indirection as a
+first-class flag, so the king needs zero C patches.**
 
+- `--serf-bin <path>` is a stock vere option (`pkg/vere/main.c:382` option 11 →
+  `u3_Host.wrk_c = strdup(optarg)`, defaulting to the self-binary at `:3297`).
+  `wrk_c` is used verbatim as `arg[0]` **and** `ops_u.file` at *both* spawn sites
+  — run (`lord.c:993,1026,1083`) and boot (`lord.c:1260,1291,1335`). Nothing
+  clobbers it; the `dock`/`pace` self-copy is a separate explicit subcommand.
+  So pointing `--serf-bin` at `eris-serf` redirects the spawn end-to-end with no
+  source change. `pkg/vere/mars.c` (vere's own serf) simply stays compiled and
+  unused.
+- Build as `eris` via the stock build option: **`zig build -Drelease
+  -Dbinary-name=eris`** (binary name is `-Dbinary-name`, default `urbit`,
+  `build.zig:231`). No patch to rename, either.
 - **Zig 0.15.2**, matching vere @ develop's CI (`mlugg/setup-zig@v2`,
-  `version: 0.15.2`; `ext/nasm`'s `0.14.0` is only a floor). Pin it in the
-  orchestrator and CI; record alongside the vere pin.
-- Reuse `third_party/vere/build.zig` (it already assembles the king from
-  `pkg/{c3,ent,ur,noun,vere}` + vendored `ext/{curl,gmp,h2o,libuv,...}`). The
-  Eris king build **omits `pkg/vere/mars.c`** (vere's own serf) and produces the
-  king binary `eris`.
-- **`patches/vere/0001-serf-bin.patch`** (planned): add a `--serf-bin <path>`
-  flag and redirect the serf-spawn path (`pkg/vere/lord.c`, argv build at
-  `~lord.c:1027-1046` / `:1292-1308`) to exec the external Rust serf instead of
-  re-exec'ing `argv[0] work|boot`. `--serf-bin` is a natural fit for that spawn
-  site and keeps dev ergonomic (point at a freshly built `eris-serf`).
-- `king/` holds any Eris-owned C glue + the build entry; vere source edits stay
-  in `patches/vere/`.
+  `version: 0.15.2`; `ext/nasm`'s `0.14.0` is only a floor).
+- Output: `third_party/vere/zig-out/<zig-triple>/eris`
+  (`build.zig:608`). Native darwin builds use the system SDK; the `macos_sdk`
+  lazy dep is cross-only, and `ext/{curl,gmp,h2o,libuv,...}` are vendored `.path`
+  deps — so a native build needs no network (but the first one is slow).
+- **`patches/vere/` stays empty.** `king/` is currently just a README; any
+  Eris-owned C glue would go there, and any unavoidable future vere edit in
+  `patches/vere/`.
 
-## Orchestrator — TODO
+### Consequence: the serf must match vere's spawn CLI
 
-A top-level `justfile` (or `Makefile`):
-- `apply` → `patches/apply.sh` (both submodules)
-- `serf` → `apply` + `cargo build` in `serf/`
-- `king` → `apply` + `zig build` in the king
-- `build` → `serf` + `king`
-- `dev` → boot a fake ship with the king pointed at the built serf via
-  `--serf-bin` (model on vere's `boot-fake-ship.sh`).
+Because the king is stock, the compatibility burden moves entirely to the serf.
+The king invokes the serf binary as `eris-serf work|boot <flags>`, where the
+flags are vere-serf's (`--snap-dir`, `--runtime-config`, `--temporary-cache-size`,
+`--loom`, `--toss`, `--persistent-cache-size`, `--snap-time`, `--lmdb-map-size`,
+and optional `--play-until` / `--ephemeral-file` / `--win-intr-handle`). The
+Eris serf must accept this exact CLI (interpreting or harmlessly ignoring each
+flag) before it ever speaks newt. This invocation contract is recorded in
+`docs/seam-contract.md`.
+
+## Orchestrator — DONE (`justfile`)
+
+- `just apply` → `patches/apply.sh` (both submodules, idempotent)
+- `just serf` → `apply` + `cargo build --release` in `serf/`
+- `just king` → `zig build -Drelease -Dbinary-name=eris` in the vere submodule
+- `just build` → both
+- `just serf-bin` / `just king-bin` → resolved binary paths
+- `just dev PILL=/path/to/pill [ship=NAME]` → boot a fake ship, king driving the
+  serf via `--serf-bin` (modelled on vere's `boot-fake-ship.sh`; won't boot until
+  the serf implements the newt seam)
+- `just clean-pier` → remove the dev pier
 
 ## Status
 
-| Piece                    | State |
-|--------------------------|-------|
-| serf pin / isolation     | **done & verified** (`0001-standalone-nockvm-ws.patch`, regen tool, toolchain pin) |
-| serf crate skeleton      | stub (`serf/`) — no shim logic yet |
-| king build (zig, no-mars)| not started |
-| `--serf-bin` patch       | not started |
-| orchestrator / `dev`     | not started |
-| CI (pins + Zig 0.15.2)   | not started |
+| Piece                      | State |
+|----------------------------|-------|
+| serf pin / isolation       | **done & verified** (`0001-standalone-nockvm-ws.patch`, regen tool, toolchain pin) |
+| king build (stock, `eris`) | **done** — `just king` (`-Dbinary-name=eris`, no patch); first real build not yet run |
+| `--serf-bin` wiring        | **done** — stock vere flag, no patch |
+| orchestrator / `dev`       | **done** (`justfile`) |
+| serf crate shim logic      | stub (`serf/`) — the actual work: serf CLI + newt + Serf/nockvm |
+| CI (pins + Zig 0.15.2)     | not started |
+
+The next real work is entirely serf-side: make `eris-serf` accept vere's spawn
+CLI and implement the newt seam over nockvm's `Serf`.
