@@ -555,8 +555,18 @@ fn handle_poke(
     Ok(())
 }
 
+/// Create the pier's `.urb` skeleton that the king's vane drivers (lick, …)
+/// mkdir into. In stock Vere the serf's disk layer makes `.urb`; ours owns
+/// persistence differently (eris.pma), so we must create it ourselves.
+fn ensure_pier_dirs(snap_dir: &str) {
+    let urb = std::path::Path::new(snap_dir).join(".urb");
+    let _ = std::fs::create_dir_all(urb.join("put"));
+    let _ = std::fs::create_dir_all(urb.join("get"));
+}
+
 fn run_boot(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("eris-serf boot: snap-dir={snap_dir}; reading %boot writ from fd0");
+    ensure_pier_dirs(snap_dir);
     let body = {
         let mut inp = std::io::stdin().lock();
         read_frame(&mut inp)?.ok_or("no %boot writ on fd0")?
@@ -586,6 +596,7 @@ fn run_boot(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_work(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+    ensure_pier_dirs(snap_dir);
     // `_pma` must outlive `ctx`: its mmap backs the restored offset-form nouns.
     let (mut ctx, _pma, mut arvo, mut eve) = open_restore(snap_dir)?;
     eprintln!("eris-serf work: restored from PMA (eve={eve}), jets warm");
