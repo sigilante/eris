@@ -37,10 +37,12 @@ and record it here and in `CHANGES.md`.
   and to jam/cue IPC nouns), and the **king-side** of `pkg/vere` (`king.c`,
   `pier.c`, `lord.c`, `newt.c`, drivers, `disk.c`).
 - **Leave / replace:** `pkg/vere/mars.c` is Vere's own serf (the Nock computer).
-  Eris does **not** run it — the Rust serf replaces that process. No patch is
-  needed: vere's stock `--serf-bin` flag points the spawn at `eris-serf`
-  (`wrk_c`), so `mars.c` just stays compiled but unused. `patches/vere/` is
-  therefore empty. See `docs/build.md` and `docs/seam-contract.md`.
+  Eris does **not** run it — the Rust serf replaces that process. The spawn
+  redirect needs no patch: vere's stock `--serf-bin` flag points it at
+  `eris-serf` (`wrk_c`), so `mars.c` just stays compiled but unused. The only
+  `patches/vere/` entry is unrelated — `0001-build-git-rev-optional.patch`, a
+  build-system fix so vere builds from a submodule gitlink / tarball (no `.git`
+  dir). See `docs/build.md` and `docs/seam-contract.md`.
 
 ### From `third_party/nockchain` — the serf
 - **Take:** the `nockvm` interpreter + jets + PMA (`crates/nockvm/rust/nockvm`)

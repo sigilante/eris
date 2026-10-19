@@ -9,6 +9,10 @@ profile := "release"                                   # serf build profile: rel
 cargoflags := if profile == "release" { "--release" } else { "" }
 ship := "zod"                                          # default fake-ship for `dev`
 pier := "pier-" + ship
+# macOS-26/zig-0.15 king-build workaround (self-disables elsewhere); see docs/build.md.
+shim     := justfile_directory() / "tools/xcrun-shim"
+# Project-local zig global cache: hermetic from a poisoned ~/.cache/zig.
+zigcache := justfile_directory() / ".zig-global-cache"
 
 _default:
     @just --list
@@ -21,11 +25,13 @@ apply:
 serf *ARGS: apply
     cd {{serfdir}} && cargo build {{cargoflags}} {{ARGS}}
 
-# Build the urth/king: stock vere via Zig, named `eris`, ReleaseFast.
-# No vere patch — mars.c stays compiled but unused; we drive via --serf-bin.
+# Build the urth/king: vere via Zig, named `eris`, ReleaseFast. Driven via
+# --serf-bin (mars.c stays compiled but unused). One patch: git-rev read made
+# best-effort (patches/vere/0001). The xcrun shim + project-local global cache
+# are the macOS-26/zig-0.15 workaround (no-op on healthy hosts).
 # -> third_party/vere/zig-out/<triple>/eris   (first build is slow: builds ext/*)
-king:
-    cd {{vere}} && zig build -Drelease -Dbinary-name=eris
+king: apply
+    cd {{vere}} && PATH="{{shim}}:$PATH" zig build -Drelease -Dbinary-name=eris --global-cache-dir "{{zigcache}}"
 
 # Build both artifacts.
 build: serf king

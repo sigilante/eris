@@ -1,0 +1,24 @@
+#!/bin/bash
+# xcrun shim — macOS 26 / zig 0.15.x king-build workaround.
+#
+# zig 0.15.x (vere's pinned toolchain) cannot read the macOS 26/27 SDK's
+# libSystem.tbd, so it fails to link even its own `zig build` runner (every
+# libSystem symbol undefined). SDKROOT is ignored; the lever is xcrun, which zig
+# invokes as `xcrun --sdk macosx --show-sdk-path`. We report an older,
+# zig-compatible SDK for SDK-path/version queries (matched ANYWHERE in argv) and
+# pass everything else through. See docs/build.md and Vere's Claude memory
+# 'zig-macos26-workaround'. Drop once vere's build.zig.zon accepts a newer zig.
+SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk
+[ -d "$SDK" ] || SDK="$(ls -d /Library/Developer/CommandLineTools/SDKs/MacOSX15*.sdk 2>/dev/null | sort -V | tail -1)"
+# Self-disable where the workaround isn't needed: no old SDK present (a healthy
+# host, or a newer zig), or not macOS — behave exactly as the real xcrun.
+if [ -z "$SDK" ] || [ ! -d "$SDK" ] || [ ! -x /usr/bin/xcrun ]; then
+  exec /usr/bin/xcrun "$@" 2>/dev/null || exit 0
+fi
+for a in "$@"; do
+  case "$a" in
+    --show-sdk-path)    echo "$SDK";  exit 0 ;;
+    --show-sdk-version) echo "15.4";  exit 0 ;;
+  esac
+done
+exec /usr/bin/xcrun "$@"

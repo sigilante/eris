@@ -1,7 +1,8 @@
-# Build outputs (Eris top level; submodules carry their own ignores)
-/target/
-/zig-out/
-/.zig-cache/
+# Build outputs (submodules carry their own ignores)
+target/
+zig-out/
+.zig-cache/
+/.zig-global-cache/
 **/*.o
 **/*.a
 

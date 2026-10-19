@@ -19,22 +19,27 @@ Entry format:
 
 ---
 
-## 2026-10-19 — King build + orchestrator (no vere patch)
+## 2026-10-19 — King builds & runs: `eris` (one vere patch + macOS-26 workaround)
 - **Scope:** king / build
-- **Upstream touched:** none — vere is used stock
-- **Mechanism:** new code (`justfile`); build flags only
-- **What:** King is built as `eris` from stock vere with `zig build -Drelease
-  -Dbinary-name=eris` (Zig 0.15.2). The serf is spawned via vere's **existing**
-  `--serf-bin` flag (`main.c` opt 11 → `wrk_c`, used as `arg[0]`+`file` at both
-  `lord.c` spawn sites), so **no vere patch is needed**; `mars.c` stays compiled
-  but unused. Added a `justfile` (apply / serf / king / build / dev). Recorded
-  the king→serf invocation argv as the "invocation contract" in
-  `docs/seam-contract.md`.
-- **Why:** Vere already separates the worker-binary path; exploiting it keeps
-  `patches/vere/` empty (minimal divergence). The compatibility burden moves to
-  the serf, which must accept vere's spawn CLI.
-- **Re-apply risk:** none (no patch). On a vere bump, re-check that `--serf-bin`,
-  `-Dbinary-name`, and the spawn argv (invocation contract) are unchanged.
+- **Upstream touched:** vere@`81404b1a` — `build.zig` (git-rev read)
+- **Mechanism:** patch (`patches/vere/0001-build-git-rev-optional.patch`);
+  `justfile`; build flags
+- **What:** Built the king as `eris` (`zig build -Drelease -Dbinary-name=eris`,
+  Zig 0.15.2) — Mach-O arm64, `urbit 5.0 live`, exposes `--serf-bin`. The serf
+  **spawn** needs no patch (vere's stock `--serf-bin` → `wrk_c` → `arg[0]`/`file`
+  at both `lord.c` sites; `mars.c` stays compiled but unused). The **one** patch
+  is unrelated: `build.zig` read `.git/logs/HEAD` with `try` (fatal), assuming
+  `.git` is a dir — but a submodule gitlink (and a tarball) have no such dir, so
+  it died `error.NotDir`; made best-effort. Host workaround for macOS-26/zig-0.15
+  (SDK 27 unreadable by zig): `tools/xcrun-shim/` + project-local
+  `--global-cache-dir`, baked into `just king`, self-disabling elsewhere. Added
+  the `justfile` and the king→serf invocation contract in `docs/seam-contract.md`.
+- **Why:** Reuse vere's battle-tested build; keep divergence to one upstreamable
+  patch. The compatibility burden lands on the serf (must accept vere's spawn CLI).
+- **Re-apply risk:** `0001` is a tiny `build.zig` hunk — re-check it still applies
+  on a vere bump (the version-stamping code may move). The macOS workaround is
+  host-specific; drop it once vere accepts a newer zig. Re-verify `--serf-bin`,
+  `-Dbinary-name`, and the spawn argv on each bump.
 
 ## 2026-10-19 — Serf build: isolate nockvm from the monorepo
 - **Scope:** serf / build

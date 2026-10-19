@@ -10,6 +10,10 @@ Build: `just king` → `zig build -Drelease -Dbinary-name=eris` in the submodule
 (no rename patch either — binary name is a build option). Output:
 `third_party/vere/zig-out/<triple>/eris`.
 
-So this directory is **reserved** — currently nothing Eris-owned is needed on the
-king side. Any future Eris C glue would live here; any unavoidable vere source
-edit would live in `patches/vere/` (see `patches/README.md`), which is empty.
+So this directory is **reserved** — no Eris-owned C is needed on the king side.
+Any future Eris C glue would live here. The one vere source edit lives in
+`patches/vere/0001-build-git-rev-optional.patch` (a build-system fix, unrelated
+to the serf redirect — it lets vere build from a submodule gitlink / tarball).
+
+On macOS 26 the king build needs the `tools/xcrun-shim/` + project-local zig
+cache workaround baked into `just king`; see `docs/build.md`.
