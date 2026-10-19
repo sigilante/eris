@@ -326,11 +326,11 @@ fn verb_ovum(stack: &mut NockStack) -> Noun {
     T(stack, &[wire, card])
 }
 
-/// `[wire [%whom ~zod]]` — identity. ~zod = @p 0.
-fn whom_ovum(stack: &mut NockStack) -> Noun {
+/// `[wire [%whom who]]` — identity (@p from the king's %boot vent).
+fn whom_ovum(stack: &mut NockStack, ship: Noun) -> Noun {
     let wire = arvo_wire(stack);
     let whom = mote(stack, "whom");
-    let card = T(stack, &[whom, D(0)]);
+    let card = T(stack, &[whom, ship]);
     T(stack, &[wire, card])
 }
 
@@ -343,13 +343,13 @@ fn wack_ovum(stack: &mut NockStack) -> Noun {
     T(stack, &[wire, card])
 }
 
-/// `[[%d %term '1' ~] [%boot | [%fake ~zod]]]` — legacy fakezod boot event.
-fn boot_ovum(stack: &mut NockStack) -> Noun {
+/// `[[%d %term '1' ~] [%boot | [%fake who]]]` — legacy fake-ship boot event.
+fn boot_ovum(stack: &mut NockStack, ship: Noun) -> Noun {
     let d = mote(stack, "d");
     let term = mote(stack, "term");
     let wire = T(stack, &[d, term, D(0x31), D(0)]); // [%d %term '1' ~]
     let fake = mote(stack, "fake");
-    let vent = T(stack, &[fake, D(0)]); // [%fake ~zod]
+    let vent = T(stack, &[fake, ship]); // [%fake who]
     let boot = mote(stack, "boot");
     let card = T(stack, &[boot, D(1), vent]); // [%boot %.n vent]  (not lite)
     T(stack, &[wire, card])
@@ -420,42 +420,69 @@ fn write_plea(ctx: &mut Context, plea: Noun) -> std::io::Result<()> {
 /// Persist {kernel, jet cold-state} to a PMA in `snap_dir` (+ a tiny roots
 /// sidecar). Unlike a jam-file, this carries the `Cold` dashboard forward, so
 /// `work` restores with jets warm. Called from `boot` (fresh PMA).
+/// Roots sidecar: four LE u64 — {arvo_raw, cold_off, eve, who}.
+fn write_roots(
+    dir: &std::path::Path,
+    arvo_raw: u64,
+    cold_off: u64,
+    eve: u64,
+    who: u64,
+) -> std::io::Result<()> {
+    let mut buf = [0u8; 32];
+    buf[0..8].copy_from_slice(&arvo_raw.to_le_bytes());
+    buf[8..16].copy_from_slice(&cold_off.to_le_bytes());
+    buf[16..24].copy_from_slice(&eve.to_le_bytes());
+    buf[24..32].copy_from_slice(&who.to_le_bytes());
+    std::fs::write(dir.join("eris.roots"), buf)
+}
+
+fn read_roots(dir: &std::path::Path) -> Result<(u64, u64, u64, u64), Box<dyn std::error::Error>> {
+    let b = std::fs::read(dir.join("eris.roots")).map_err(|e| format!("no roots: {e}"))?;
+    if b.len() < 32 {
+        return Err("roots sidecar too short".into());
+    }
+    let u = |i: usize| u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+    Ok((u(0), u(8), u(16), u(24)))
+}
+
+/// Evacuate {arvo, cold} into `pma`, record roots to the sidecar, sync. Shared
+/// by the boot snapshot and the work-time %sync re-snapshot. Mutates `arvo`
+/// (and cold) to offset-form; returns the recorded arvo_raw/cold_off are durable.
+fn persist(
+    ctx: &mut Context,
+    pma: &mut Pma,
+    dir: &std::path::Path,
+    arvo: &mut Noun,
+    eve: u64,
+    who: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    unsafe {
+        arvo.copy_to_pma(&ctx.stack, pma);
+        ctx.cold.copy_to_pma(&ctx.stack, pma);
+    }
+    let arvo_raw = unsafe { arvo.as_raw() };
+    let cold_off: u64 = ctx.cold.pma_offset(pma).ok_or("cold not in pma after copy")?.into();
+    pma.persist_metadata();
+    pma.sync_all()?;
+    pma.sync_file()?;
+    write_roots(dir, arvo_raw, cold_off, eve, who)?;
+    Ok(())
+}
+
 fn save_snapshot(
     ctx: &mut Context,
     snap_dir: &str,
     arvo: Noun,
     eve: u64,
+    who: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(snap_dir)?;
     let dir = std::path::Path::new(snap_dir);
     let pma_path = dir.join("eris.pma");
     let _ = std::fs::remove_file(&pma_path); // fresh boot snapshot
     let mut pma = Pma::new(NOCK_STACK_SIZE, pma_path).map_err(|e| format!("pma new: {e:?}"))?;
-
     let mut arvo = arvo;
-    // Evacuate kernel + cold jet-state into the PMA (mutates them to offset-form).
-    unsafe {
-        arvo.copy_to_pma(&ctx.stack, &mut pma);
-        ctx.cold.copy_to_pma(&ctx.stack, &mut pma);
-    }
-    // Record roots AFTER copy (file-relative, stable across restart).
-    let arvo_raw = unsafe { arvo.as_raw() };
-    let cold_off: u64 = ctx
-        .cold
-        .pma_offset(&pma)
-        .ok_or("cold not in pma after copy")?
-        .into();
-
-    pma.persist_metadata();
-    pma.sync_all()?;
-    pma.sync_file()?;
-
-    let mut buf = [0u8; 24];
-    buf[0..8].copy_from_slice(&arvo_raw.to_le_bytes());
-    buf[8..16].copy_from_slice(&cold_off.to_le_bytes());
-    buf[16..24].copy_from_slice(&eve.to_le_bytes());
-    std::fs::write(dir.join("eris.roots"), buf)?;
-    Ok(())
+    persist(ctx, &mut pma, dir, &mut arvo, eve, who)
 }
 
 /// Reopen a PMA snapshot into a fresh, jet-warm `Context`: install the arena,
@@ -465,16 +492,10 @@ fn save_snapshot(
 /// offset nouns), the kernel, and the event number.
 fn open_restore(
     snap_dir: &str,
-) -> Result<(Context, Pma, Noun, u64), Box<dyn std::error::Error>> {
+) -> Result<(Context, Pma, Noun, u64, u64), Box<dyn std::error::Error>> {
     let dir = std::path::Path::new(snap_dir);
     let pma = Pma::open(dir.join("eris.pma")).map_err(|e| format!("pma open: {e:?}"))?;
-    let roots = std::fs::read(dir.join("eris.roots")).map_err(|e| format!("no roots: {e}"))?;
-    if roots.len() < 24 {
-        return Err("roots sidecar too short".into());
-    }
-    let arvo_raw = u64::from_le_bytes(roots[0..8].try_into().unwrap());
-    let cold_off = u64::from_le_bytes(roots[8..16].try_into().unwrap());
-    let eve = u64::from_le_bytes(roots[16..24].try_into().unwrap());
+    let (arvo_raw, cold_off, eve, who) = read_roots(dir)?;
 
     let mut stack = NockStack::new(NOCK_STACK_SIZE, 0);
     stack.install_pma_arena(Arc::clone(pma.arena())); // MUST precede resolving PMA nouns
@@ -503,15 +524,15 @@ fn open_restore(
         test_jets,
         arena,
     };
-    Ok((ctx, pma, arvo, eve))
+    Ok((ctx, pma, arvo, eve, who))
 }
 
-/// `[%ripe [pro=%2 kel=~] [who=~zod fake=&] [eve mug]]`
-fn make_ripe(ctx: &mut Context, arvo: Noun, eve: u64) -> Noun {
+/// `[%ripe [pro=%2 kel=~] [who fake=&] [eve mug]]`
+fn make_ripe(ctx: &mut Context, arvo: Noun, eve: u64, who: u64) -> Noun {
     let mug = mug_u32(&mut ctx.stack, arvo) as u64;
     let ripe = mote(&mut ctx.stack, "ripe");
     let prokel = T(&mut ctx.stack, &[D(2), D(0)]); // [%2 ~]
-    let whofake = T(&mut ctx.stack, &[D(0), D(0)]); // [~zod &]
+    let whofake = T(&mut ctx.stack, &[D(who), D(0)]); // [who &(fake)]
     let evemug = T(&mut ctx.stack, &[D(eve), D(mug)]);
     T(&mut ctx.stack, &[ripe, prokel, whofake, evemug])
 }
@@ -587,20 +608,42 @@ fn run_boot(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| "pill.p is not an atom")?
             .to_le_bytes()
     };
-    eprintln!("eris-serf boot: pill {} bytes; booting", pill_bytes.len());
+
+    // Ship identity from vent: [%fake who] | [%dawn seed] (who = head of seed).
+    let vent = head_of(&ctx, tail_of(&ctx, com)?)?; // com = [pill vent more]
+    let vtag = atom_str(&ctx, head_of(&ctx, vent)?);
+    let ship = if vtag == "fake" {
+        tail_of(&ctx, vent)?
+    } else {
+        head_of(&ctx, tail_of(&ctx, vent)?)?
+    };
+    let who: u64 = {
+        let sp = ctx.stack.noun_space();
+        ship.in_space(&sp)
+            .as_atom()
+            .ok()
+            .and_then(|a| a.as_u64().ok())
+            .unwrap_or(0)
+    };
+    eprintln!(
+        "eris-serf boot: pill {} bytes; vent=%{vtag} who={who}; booting",
+        pill_bytes.len()
+    );
     let pill = cue_bytes(&mut ctx, &pill_bytes).map_err(fmt_err)?;
-    let (arvo, eve) = boot_arvo(&mut ctx, pill)?;
-    save_snapshot(&mut ctx, snap_dir, arvo, eve)?;
-    eprintln!("eris-serf boot: booted eve={eve}, snapshot saved; exiting 0");
+    let (arvo, eve) = boot_arvo(&mut ctx, pill, ship)?;
+    save_snapshot(&mut ctx, snap_dir, arvo, eve, who)?;
+    eprintln!("eris-serf boot: booted eve={eve} who={who}, snapshot saved; exiting 0");
     Ok(())
 }
 
 fn run_work(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
     ensure_pier_dirs(snap_dir);
-    // `_pma` must outlive `ctx`: its mmap backs the restored offset-form nouns.
-    let (mut ctx, _pma, mut arvo, mut eve) = open_restore(snap_dir)?;
-    eprintln!("eris-serf work: restored from PMA (eve={eve}), jets warm");
-    let ripe = make_ripe(&mut ctx, arvo, eve);
+    let dir = std::path::Path::new(snap_dir).to_path_buf();
+    // `pma` must outlive `ctx`: its mmap backs the restored offset-form nouns,
+    // and %sync/%exit re-persist into it.
+    let (mut ctx, mut pma, mut arvo, mut eve, who) = open_restore(snap_dir)?;
+    eprintln!("eris-serf work: restored from PMA (eve={eve} who={who}), jets warm");
+    let ripe = make_ripe(&mut ctx, arvo, eve, who);
     write_plea(&mut ctx, ripe)?;
     eprintln!("eris-serf work: %ripe sent (eve={eve})");
 
@@ -624,10 +667,10 @@ fn run_work(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
                 let pl = T(&mut ctx.stack, &[pk, inr]);
                 write_plea(&mut ctx, pl)?;
             }
-            // v1: ack only. Durable re-snapshot of post-boot live events (which
-            // needs same-PMA re-persist) is a follow-up; the boot snapshot is the
-            // durable baseline.
+            // Durable re-snapshot of live state into the same PMA (incremental:
+            // copy_to_pma shares unchanged subtrees already resident).
             "sync" => {
+                persist(&mut ctx, &mut pma, &dir, &mut arvo, eve, who)?;
                 let pl = make_sync(&mut ctx, arvo, eve);
                 write_plea(&mut ctx, pl)?;
             }
@@ -637,7 +680,8 @@ fn run_work(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
                 write_plea(&mut ctx, pl)?;
             }
             "exit" => {
-                eprintln!("eris-serf work: %exit; exiting 0");
+                persist(&mut ctx, &mut pma, &dir, &mut arvo, eve, who)?;
+                eprintln!("eris-serf work: %exit (persisted eve={eve}); exiting 0");
                 break;
             }
             other => eprintln!("eris-serf work: unhandled writ %{other}; ignoring"),
@@ -649,7 +693,11 @@ fn run_work(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
 /// Build + boot an Arvo kernel from an already-cued Vere pill noun.
 /// Returns (arvo, eve) where eve = number of events applied. Shared by the
 /// `boot-pill` dev command and the king-driven `boot` subcommand.
-fn boot_arvo(ctx: &mut Context, pill: Noun) -> Result<(Noun, u64), Box<dyn std::error::Error>> {
+fn boot_arvo(
+    ctx: &mut Context,
+    pill: Noun,
+    ship: Noun,
+) -> Result<(Noun, u64), Box<dyn std::error::Error>> {
     // Destructure [tag typ bot mod use] (unwrapping %cash -> real pill).
     let tag = head_of(ctx, pill)?;
     let tag_s = atom_str(ctx, tag);
@@ -687,14 +735,14 @@ fn boot_arvo(ctx: &mut Context, pill: Noun) -> Result<(Noun, u64), Box<dyn std::
     let ov = verb_ovum(&mut ctx.stack);
     poke_ovum(ctx, &mut arvo, ov, "verb")?;
     eve += 1;
-    let ov = whom_ovum(&mut ctx.stack);
+    let ov = whom_ovum(&mut ctx.stack, ship);
     poke_ovum(ctx, &mut arvo, ov, "whom")?;
     eve += 1;
     let ov = wack_ovum(&mut ctx.stack);
     poke_ovum(ctx, &mut arvo, ov, "wack")?;
     eve += 1;
     eve += poke_list(ctx, &mut arvo, modl, "mod")? as u64;
-    let ov = boot_ovum(&mut ctx.stack);
+    let ov = boot_ovum(&mut ctx.stack, ship);
     poke_ovum(ctx, &mut arvo, ov, "boot")?;
     eve += 1;
     eve += poke_list(ctx, &mut arvo, usel, "use")? as u64;
@@ -711,7 +759,7 @@ fn run_boot_pill(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let jammed = Atom::from_bytes(&mut ctx.stack, &bytes);
     let pill = cue(&mut ctx.stack, jammed).map_err(fmt_err)?;
     eprintln!("  cued pill in {:.2?}", t0.elapsed());
-    let (_arvo, eve) = boot_arvo(&mut ctx, pill)?;
+    let (_arvo, eve) = boot_arvo(&mut ctx, pill, D(0))?; // ~zod
     eprintln!("eris-serf boot-pill: fakezod booted (eve={eve}).");
     Ok(())
 }
