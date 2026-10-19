@@ -1,0 +1,6 @@
+[submodule "vere"]
+	path = third_party/vere
+	url = git@github.com:urbit/vere.git
+[submodule "nockchain"]
+	path = third_party/nockchain
+	url = git@github.com:nockchain/nockchain.git

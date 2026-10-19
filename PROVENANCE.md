@@ -1,0 +1,82 @@
+# PROVENANCE
+
+Eris is assembled from two upstreams. **Nothing in `third_party/` is edited in
+place.** Every departure from upstream is either (a) new Eris-owned code under
+`king/` or `serf/`, or (b) a patch in `patches/` applied against the pinned
+submodule. This file is the authoritative ledger of *where each piece comes
+from*; `CHANGES.md` is the ledger of *what we changed and why*.
+
+If you touch a vendored file, you are doing it wrong — add an overlay or a patch
+and record it here and in `CHANGES.md`.
+
+## Upstream pins
+
+| Submodule            | Upstream                         | Pinned commit | Ref at pin        | Role in Eris |
+|----------------------|----------------------------------|---------------|-------------------|--------------|
+| `third_party/vere`   | `git@github.com:urbit/vere.git`  | `81404b1a784c01ae3ecf058949dfb4529b395ef6` | `origin/develop`  | the **urth / king**: IO drivers, process supervision, newt IPC, LMDB log plumbing, the u3 noun library (`pkg/{c3,ent,ur,noun}`), and the king half of `pkg/vere` |
+| `third_party/nockchain` | `git@github.com:nockchain/nockchain.git` | `73877be29bd1fafeeade1be7b95aebb0f64d8382` | `origin/master` | source of the **mars / serf** core: `crates/nockvm/rust/{nockvm,ibig,murmur3,nockvm_macros,...}` and the `Serf` kernel logic in `crates/nockapp` |
+
+### Why these pins
+
+- **Vere @ `origin/develop`**, not `master`: develop carries the modern serf
+  architecture Eris targets — the serf owns its LMDB event log and self-replays
+  (**there is no `%play` message**); snapshots are the incremental
+  `image.bin`/`memory.bin`/`control.bin` scheme. The king↔serf newt contract
+  (protocol **v2**) was verified byte-identical between this pin and the
+  working-tree checkout the seam analysis was done on. Active 64-bit /
+  pointer-compression work also lands here. Conservative alternative:
+  `origin/master` (`5a7614f69bbc783736b08965fdc0a2534bb42e82`).
+- **Nockchain @ `origin/master` (`73877be2`)**: same baseline as the Oct-2026
+  security audit, so the serf we lift has a known security posture.
+
+## What we take from each upstream (and what we deliberately leave)
+
+### From `third_party/vere` — the king
+- **Take:** `pkg/c3` (types), `pkg/ent` (entropy), `pkg/ur` (jam/cue bitstream),
+  `pkg/noun` (the u3 noun library — the king links it for ivory-pill tracing
+  and to jam/cue IPC nouns), and the **king-side** of `pkg/vere` (`king.c`,
+  `pier.c`, `lord.c`, `newt.c`, drivers, `disk.c`).
+- **Leave / replace:** `pkg/vere/mars.c` is Vere's own serf (the Nock computer).
+  Eris does **not** run it — the Rust serf replaces that process. The king must
+  be redirected to spawn the Rust serf binary instead of re-exec'ing
+  `vere work|boot` (this is the one unavoidable upstream edit; see
+  `patches/vere/` and `CHANGES.md`).
+
+### From `third_party/nockchain` — the serf
+- **Take:** the `nockvm` interpreter + jets + PMA (`crates/nockvm/rust/nockvm`)
+  and its local deps (`ibig`, `murmur3`, `nockvm_macros`, `assert_no_alloc`,
+  `nockvm_crypto`); the `Serf` kernel logic from `crates/nockapp`
+  (`src/kernel/form.rs`, `src/noun/ops.rs`) as the *reference* for Eris's own
+  serf crate under `serf/`.
+- **Leave:** NockApp's king role entirely — its tokio run loop, the driver
+  framework (`src/nockapp/driver.rs`, `mod.rs`), the libp2p/grpc/wallet/bridge
+  crates, and all of `zkvm-jetpack` (the ~148 Nockchain-specific zk-STARK/field
+  jets are irrelevant to Arvo and are never loaded).
+
+## Compatibility facts that make the graft sound (verified, keep current)
+
+These are load-bearing. If an upstream bump breaks one, it is a release blocker.
+
+- **jam/cue** is wire-identical between nockvm and Vere/Urbit.
+- **mug is byte-exact**: both use murmur3_32, seeds `0xCAFEBABE` (atom) /
+  `0xDEADBEEF` (cell), same fallbacks and 31-bit fold. nockvm's 63-bit direct
+  atoms vs Vere's 31-bit do **not** change the hash (it hashes little-endian
+  bytes). ⇒ the `%ripe` mug and per-event replay mug-checks pass without
+  `--soft-mugs`.
+- **Nock 0–12** standard in both; scry (opcode 12) is an in-Nock
+  `(unit (unit *))` namespace, matching Vere `.^` semantics.
+- **Kelvin gap (open risk):** nockvm jets are pinned to Hoon **k138** (`K_138`
+  in `jets/hot.rs`); Vere's live dashboard is **k140**. Jets only fire against a
+  matching kelvin. Running current Arvo requires re-pinning the serf jets to the
+  Arvo kelvin and porting missing arms (esp. the `ut` compiler jets and `e/`
+  crypto). Tracked as the primary engineering cost; see `docs/architecture.md`.
+
+## Updating a pin
+
+1. `cd third_party/<name> && git fetch origin && git checkout <new-sha>`
+2. `cd ../.. && git add third_party/<name>` to record the new pin.
+3. Re-apply the patch series: `patches/apply.sh <name>` (see `patches/README.md`).
+   Resolve any rejects; if a patch no longer applies cleanly, update it and note
+   the churn in `CHANGES.md`.
+4. Re-verify the compatibility facts above (seam contract, mug, jam/cue, kelvin).
+5. Update the pin row in this table and add a dated line to `CHANGES.md`.

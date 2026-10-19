@@ -1,6 +1,6 @@
 # Eris
 
-An implementation of the Urbit runtime
+A Discordian implementation of the Urbit runtime for use by the most beautiful.
 
 ![](./img/kallisti.png)
 

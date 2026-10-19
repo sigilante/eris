@@ -1,0 +1,10 @@
+# Build outputs (Eris top level; submodules carry their own ignores)
+/target/
+/zig-out/
+/.zig-cache/
+**/*.o
+**/*.a
+
+# Local scratch
+/.DS_Store
+*.swp
