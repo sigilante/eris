@@ -8,9 +8,17 @@
 //! `crates/nockapp/src/kernel/form.rs` but with the newt transport in place of
 //! its tokio mpsc channel.
 //!
-//! Not yet implemented — this is the build skeleton.
+//! Not yet implemented — this is the build skeleton. For now it reports the argv
+//! the king hands it (the invocation contract in `docs/seam-contract.md`) on
+//! stderr (which the king forwards), then exits so the spawn/pipe wiring can be
+//! smoke-tested via `--serf-bin`.
 
 fn main() {
-    eprintln!("eris-serf: not yet implemented (see docs/seam-contract.md)");
+    let args: Vec<String> = std::env::args().collect();
+    eprintln!("eris-serf: spawned ({} args)", args.len());
+    for (i, a) in args.iter().enumerate() {
+        eprintln!("  argv[{i}] = {a}");
+    }
+    eprintln!("eris-serf: newt seam not yet implemented; exiting 1.");
     std::process::exit(1);
 }

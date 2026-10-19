@@ -37,18 +37,27 @@ ignoring it harmlessly — or it dies before the handshake. Built by
 
 ```
 eris-serf  work|boot
-           --snap-dir <pier>/.urb/chk        # checkpoint/snapshot directory
-           --runtime-config <wag>            # runtime config word
-           --temporary-cache-size <hap>      # memo/hash table size
-           --loom <bex>                      # loom size, power of two (vere's arena)
-           --toss <w>                        # toss
-           --persistent-cache-size <per>
-           --snap-time <sap>                 # snapshot interval
-           --lmdb-map-size <siz>             # event-log map size
-           [--play-until <eve>]              # optional
+           --snap-dir <pier>                 # pier/snapshot dir (pier ROOT, not .urb/chk)
+           --runtime-config <wag>            # runtime config word (e.g. 32896)
+           --temporary-cache-size <hap>      # memo/hash table size (e.g. 50000)
+           --loom <bex>                      # loom size as a power of two (e.g. 32)
+           --toss <w>                        # toss (e.g. 0)
+           --persistent-cache-size <per>     # (e.g. 50000)
+           --snap-time <sap>                 # snapshot interval — WORK only, absent on boot
+           --lmdb-map-size <siz>             # event-log map size (e.g. 1099511627776 = 1 TiB)
+           [--play-until <eve>]              # optional (work)
            [--ephemeral-file <path>]         # optional
            [--win-intr-handle <h>]           # Windows only
 ```
+
+**Empirically confirmed (2026-10-19)** by spawning a stub `eris-serf` under a real
+`eris --serf-bin … --bootstrap <pill>` boot. Observed boot argv (16 args):
+`boot --snap-dir <pier> --runtime-config 32896 --temporary-cache-size 50000
+--loom 32 --toss 0 --persistent-cache-size 50000 --lmdb-map-size 1099511627776`.
+The king found and exec'd the serf binary, wired the three pipes, and bailed with
+`boot: error: broken pipe` when the stub exited before `%ripe` — so the spawn/pipe
+half of the seam is live; the serf side (CLI parse → newt → `%ripe`) is the gap.
+Note `boot` omits `--snap-time`; the `work` argv includes it (`lord.c:1024-1060`).
 
 Mapping to the Eris serf (nockvm + PMA + SQLite): `--snap-dir` is where PMA /
 snapshots live; `--loom` sizes the NockStack arena (vere counts it in bits);
