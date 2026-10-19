@@ -59,7 +59,41 @@ and record it here and in `CHANGES.md`.
 - **Leave:** NockApp's king role entirely — its tokio run loop, the driver
   framework (`src/nockapp/driver.rs`, `mod.rs`), the libp2p/grpc/wallet/bridge
   crates, and all of `zkvm-jetpack` (the ~148 Nockchain-specific zk-STARK/field
-  jets are irrelevant to Arvo and are never loaded).
+  jets are irrelevant to Arvo and are **never loaded**). We do, however, read
+  `zkvm-jetpack`'s `src/jets/zoon_jets.rs` as an *algorithm reference* when
+  porting stdlib doors — see "Eris-owned serf jets" below.
+
+### Eris-owned serf jets (`serf/src/jets/`)
+Jets we write to cover standard-library arms nockvm leaves unjetted (because
+Nockchain's kernels don't use them). Registered by `jets::eris_hot_state()` —
+the stock `URBIT_HOT_STATE` followed by our entries — so nockvm's own dashboard
+is **never patched**. All pinned to Hoon **k138** (`K_138`), the pill's kelvin.
+
+- **`map.rs` — the `+by` map door** (full Vere-k138 set plus `got`/`gut`/`mar`:
+  `get got gut has put del mar gas uni int dif tap key wyt apt bif run urn jab
+  all any`; `rep`/`rib` deferred — gate folds Vere doesn't jet either). The
+  gate-slamming arms (`run`/`urn`/`jab`/`all`/`any`) apply the sample gate via
+  `nockvm::jets::util::slam`, ported from Vere's `_by_*`. *Where it comes from:*
+  the core treap algorithms are cribbed from
+  `zkvm-jetpack`'s `zoon_jets::h_by_*`/`h_map_*` (Nockchain's own map door), with
+  the **comparator swapped** from the tip5-digest ordering (`+mor-tip`/`+gor-hip`,
+  over a digest-caching node) back to the stock `mug`-based `+gor`/`+mor` from
+  `nockvm::jets::sort::util`, and the node shape reverted to the stock
+  `[[key value] l r]`. Cross-checked against hoon.hoon's `+by` and Vere's
+  `pkg/noun/jets/.../by_*.c`. Equality is `nockvm::unifying_equality` (structural),
+  not `raw_equals` — the stock `set.rs` dedup TODO is exactly that bug.
+  *Why the swap is mandatory:* a stock pill's maps are `mug`-ordered treaps;
+  dropping in the digest-ordered jets would build a differently-shaped tree and
+  diverge from the pill's own unjetted results (corruption). Correctness is
+  proven by differential tests (jet vs. a `BTreeMap` oracle + treap invariants).
+- **`set.rs` — the `+in` set door** (full Vere-k138 set: `has put del gas uni
+  int dif tap wyt apt bif run all any`; `rep`/`rib` deferred). Same story and
+  sources as `map.rs`, cribbed from `zoon_jets::h_in_*`/`h_set_*`
+  with the comparator swapped back to stock `+gor`/`+mor`; the node is the
+  bare-element treap `[n l r]`. (nockvm's own `jets/set.rs` ships stock-ordered
+  `jet_put`/`jet_has` but they're commented out of the dashboard, cover only two
+  arms, and dedup with `raw_equals` — the bug this avoids.) Differential tests
+  vs. a `BTreeSet` oracle + treap invariants.
 
 ## Compatibility facts that make the graft sound (verified, keep current)
 

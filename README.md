@@ -131,11 +131,24 @@ grows — fine for short sessions.)
 
 nockvm jets the critical path — arithmetic, bits, list/set/sort, some crypto
 (aes/ed/sha), and the Hoon compiler (`mink`/`mule`/`ut`) — which is why a boot
-*completes*. But it fires ~97 jet cores where Vere installs ~2179, so the long
-tail (full `map`/`set`, the complete crypto suite, `@r` reals, many utilities)
-runs unjetted. The base-desk compile that takes Vere a few seconds takes Eris a
-few minutes. Widening jet coverage (as Eris-owned additions) is the main path to
-a usable ship; see `docs/architecture.md`.
+*completes*. But it fires ~97 jet cores where Vere installs ~2179, so most of the
+standard library runs as interpreted Nock. Vere boots the same pill in ~12s;
+Eris takes a few minutes.
+
+Eris adds its own jets without patching nockvm (registered via
+`jets::eris_hot_state`): the standard `+by` map door (`serf/src/jets/map.rs`) and
+`+in` set door (`serf/src/jets/set.rs`). **But widening coverage arm-by-arm does
+not speed up boot — this was profiled, not assumed.** An opcode census of the
+base-desk compile shows ~13 billion interpreted Nock opcodes (op9 *call* ≈ 1.1B);
+a sampling profile then showed the real self-time sinks are **nockvm's memory
+model** — `noun_preserve` (cross-frame copying), `TaggedPtr::resolve_const`
+(per-access pointer resolution), allocation churn, and the raw interpret loop.
+The Hoon parser combinators that *structure* the compile (`pfix`/`stew`/`plug`/…)
+are already jetted; `+by`/`+in` fire but are noise. So the lever for a usable
+ship is **nockvm runtime internals** (preserve/alloc churn, pointer resolution,
+gate-slam), or the upstream 64-bit/pointer-compression work — not the stdlib jet
+long tail. The map/set jets remain worthwhile for map-heavy *steady-state* ship
+operation (gall/clay) and as the porting template. See `docs/architecture.md`.
 
 ## Layout
 

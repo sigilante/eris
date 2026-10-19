@@ -19,6 +19,88 @@ Entry format:
 
 ---
 
+## 2026-10-20 — Serf jets: complete the `+by`/`+in` tails (Vere-k138 parity)
+- **Scope:** serf
+- **Upstream touched:** (none — Eris-owned, `serf/src/jets/{map,set}.rs`)
+- **Mechanism:** new code, registered in `jets::eris_hot_state()`
+- **What:** Filled out both doors to Vere's full k138 jet set. Added `+by`:
+  `tap key wyt apt bif run urn jab all any`; `+in`: `tap wyt apt bif run all any`.
+  Pure arms (`tap`/`key`/`wyt`/`apt`/`bif`) are straight treap walks; the
+  gate-slamming arms (`run`/`urn`/`jab`/`all`/`any`) apply a fixed gate via
+  `jets::util::slam`, ported from Vere's `_by_*`/`_in_*`. `+by key` builds its
+  key set with the shared `set::set_put`. 27 jet tests pass — pure arms vs.
+  `BTreeMap`/`BTreeSet` oracles + treap invariants; gate arms slam hand-built
+  gates (`[4 0 6]` increment, `[0 12]` key, `[5 [0 6] [1 0]]` is-zero) and check
+  against models. Full boot still exits 0 (no regression). **Deferred:**
+  `+rep`/`+rib` (gate folds whose accumulator lives at a gate-internal axis;
+  Vere ships no dedicated jet for them) — they run unjetted, correctly.
+- **Why:** Complete the doors for Vere parity and map/set-heavy steady-state
+  work. Per the profiling (below), this does not speed up boot; it is coverage
+  and correctness, and rounds out the upstreamable contribution.
+- **Re-apply risk:** none (additive). The gate-slamming arms depend on
+  `jets::util::slam` staying public; same kelvin/path caveats as the `+by` entry.
+
+## 2026-10-20 — Serf jets: the `+in` set door + boot profiled (jets are NOT the boot bottleneck)
+- **Scope:** serf
+- **Upstream touched:** (none — Eris-owned, `serf/src/jets/set.rs`)
+- **Mechanism:** new code (`serf/src/jets/set.rs`), registered via `IN_JETS` in
+  `jets::eris_hot_state()`
+- **What:** Added the standard `+in` set door — 7 arms (`has put del gas uni int
+  dif`) — same construction as `map.rs` (stock `[n l r]` treap, stock
+  `+gor`/`+mor`, `unifying_equality` dedup), cribbed from `zoon_jets::h_in_*`.
+  15 jet tests pass (map + set differential vs. `BTreeMap`/`BTreeSet` oracles +
+  treap invariants). Verified binds+fires on the k138 pill (`set_uni` is the
+  most-used of our jets during the base compile).
+- **Then profiled the base-desk compile** (`sample` during `use[0]`; the opcode
+  census from the `+by` entry framed it). **Finding — decision-changing:** the
+  compile bottleneck is **nockvm's memory model, not jet coverage.** The
+  authoritative self-time leaders are `mem::noun_preserve` (cross-frame noun
+  copying, #1), `noun::TaggedPtr::resolve_const` (per-access pointer/NounSpace
+  resolution, #2), raw `interpret`, and allocation churn (`raw_alloc`, frame
+  push/pop, malloc/memset). The compile is *structured* by the Hoon parser
+  combinators (`pfix/stew/plug/cook/pose/glue/stag/here`), but those are **already
+  jetted** and show high inclusive / low self time — the real cost is the
+  preserve+resolve+alloc+interpret machinery their slamming drives. The `+by`/`+in`
+  doors fire but are ~noise. **Porting more stdlib jets will not speed up boot.**
+- **Why:** `+in` is the natural companion to `+by` and load-bearing for sets in
+  steady-state (the compiler's own symbol tables, `+nest`). The profiling was the
+  stated next step and redirects the whole effort: the lever is nockvm runtime
+  internals (reduce `noun_preserve` churn, optimize tagged-pointer resolution and
+  `slam_with_space`), or the 64-bit/pointer-compression work upstream — not the
+  jet long tail. See `docs/architecture.md`.
+- **Re-apply risk:** none (additive, Eris-owned). Same kelvin/public-API caveats as
+  the `+by` entry below.
+
+## 2026-10-20 — Serf jets: the `+by` map door (first Eris-owned jet)
+- **Scope:** serf
+- **Upstream touched:** (none — Eris-owned, `serf/src/jets/`)
+- **Mechanism:** new code (`serf/src/jets/{mod.rs,map.rs}`), plus one dep
+  (`either = "1.9.0"`, matching nockchain's pin for an identical `HotEntry`)
+- **What:** Added the standard Hoon `+by` map door as Eris-owned jets — 11 arms
+  (`get got gut has put del mar gas uni int dif`) — rebuilt against the stock
+  node shape `[[key value] l r]` and the stock `mug`-based `+gor`/`+mor`
+  comparators. Registered from the serf via `jets::eris_hot_state()` (stock
+  `URBIT_HOT_STATE` ++ `BY_JETS`); **nockvm's dashboard is not patched**. All
+  three context builders (`boot`, `work`, `boot-pill`) now seed from it. Verified:
+  9 differential tests pass (jet vs. a `BTreeMap` oracle + canonical-treap
+  invariants), the jets bind and fire on the stock k138 pill, and a king-driven
+  boot is unaffected (exit 0).
+- **Why:** nockvm leaves the stdlib `+by` unjetted because Nockchain uses its own
+  digest-ordered `z-by`/`h-by` instead (see PROVENANCE). A stock Urbit pill needs
+  the ordinary door. This is also the template for `+in` (sets) and the rest of
+  the tail. **Measured caveat:** `+by` is *not* the base-compile bottleneck — an
+  opcode census shows that compile is ~13 billion interpreted Nock opcodes
+  (op9 call alone ≈ 1.1B) while maps are only ~0.3M calls, so this gives ~no boot
+  speedup. The gap vs. Vere (~12s, ~2179 jets) is broad interpreted execution of
+  the compiler and its hot stdlib helpers, not any single door. Kept because it
+  is correct, is load-bearing for map-heavy *steady-state* ship operation, and
+  seeds the porting method. Next lever needs arm-level profiling, not a guess.
+- **Re-apply risk:** none (additive, Eris-owned). On a nockchain pin bump, re-check
+  that `nockvm::jets::{sort::util::{gor,mor}, util::slot, util::test::*}` and
+  `unifying_equality` remain public, and that `HotEntry`/`K_138` are unchanged. If
+  the pill's kelvin moves off 138, the registration paths (`K_138`) must move with
+  it or the door silently stops binding (no crash, just slow).
+
 ## 2026-10-19 — King builds & runs: `eris` (one vere patch + macOS-26 workaround)
 - **Scope:** king / build
 - **Upstream touched:** vere@`81404b1a` — `build.zig` (git-rev read)

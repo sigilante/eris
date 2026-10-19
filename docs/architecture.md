@@ -50,6 +50,43 @@ talk over the frozen newt seam (`seam-contract.md`).
    `ut` compiler jets (vere `pkg/noun/jets/f/`) and `e/` crypto. Nockchain's own
    ~148 `zkvm-jetpack` jets are Arvo-irrelevant and simply never loaded.
 
+   **Eris adds its own jets** without patching nockvm's dashboard — see
+   `jets::eris_hot_state` and `serf/src/jets/`: the `+by` map door (`map.rs`) and
+   `+in` set door (`set.rs`), both cribbed from `zkvm-jetpack`'s `z-by`/`z-in`
+   with the comparator swapped back to stock `+gor`/`+mor`; PROVENANCE has the
+   detail.
+
+   **Measured, 2026-10-20 (k138 solid pill, `boot-pill`):** porting arms is not a
+   blind win, and the priority is *not* obvious from the Vere jet count. An
+   `nock_opcode_census` of the base-desk compile (`use[0]`, ~191s) shows
+   **~13 billion interpreted Nock opcodes** — op0 slot 2.2B, op6 branch 1.85B,
+   op5 equals 1.56B, op8 pin 1.24B, **op9 call 1.10B**, op10 edit 862M, op11 hint
+   393M — i.e. ~68M interpreted ops/sec grinding through the compiler and its hot
+   stdlib helpers. Against that, the entire `+by` door is invoked only ~0.3M times
+   (get 138k, put 69k, del 7k, gas 13k, …), so jetting it buys ~no boot speedup
+   (it remains worthwhile for map-heavy steady-state work and as the porting
+   template).
+
+   **Profiled, 2026-10-20 (`sample` during `use[0]`) — the lever is NOT jets.**
+   The authoritative top-of-stack self-time leaders are, in order:
+   `mem::noun_preserve` (copying live nouns across NockStack frames on return),
+   `noun::TaggedPtr::resolve_const` (resolving tagged / NounSpace pointers on
+   every access), raw `interpret`, then allocation (`raw_alloc_in_previous_frame`,
+   frame push/pop, `Hamt::preserve`, malloc/memset) and `unifying_equality`. The
+   compile is *structured* by the Hoon parser combinators (`pfix`/`stew`/`plug`/
+   `cook`/`pose`/`glue`/`stag`/`here`) — but those are **already jetted**, with
+   high inclusive and low self time; the cost under their `slam_with_space` calls
+   is the preserve + pointer-resolve + alloc + interpret machinery. `+by` and
+   `+in` fire but are noise (`set_uni` is the busiest of them). **Conclusion:
+   porting more of the stdlib jet long tail will not make boot usable.** The real
+   levers are nockvm runtime internals — cut `noun_preserve`/allocation churn,
+   make `TaggedPtr`/`NounSpace` resolution cheaper, tighten `slam_with_space` —
+   i.e. the same ground as the upstream 64-bit / pointer-compression work
+   (PROVENANCE's pin note), which should narrow the ~16x gap to Vere's u3 (loom +
+   direct pointers + refcounting; no per-access resolve, no frame-preserve copy).
+   Jets stay a correctness/compat tool, and matter for map/set-heavy steady-state
+   work — not the boot-speed lever.
+
 2. **The newt shim + wyrd/kelvin handshake.** nockapp's `Serf` already does
    poke/peek/snapshot/log/replay, but over a tokio mpsc channel with in-memory
    noun copies. The shim swaps that transport for the 5-byte jammed-noun pipe and

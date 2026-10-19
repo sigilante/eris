@@ -17,6 +17,9 @@ use std::io::{Read, Write};
 use std::sync::atomic::AtomicIsize;
 use std::sync::Arc;
 
+mod jets;
+use jets::eris_hot_state;
+
 use nockvm::ext::AtomExt;
 use nockvm::hamt::Hamt;
 use nockvm::interpreter::{interpret, Context, Error, NockCancelToken, Slogger};
@@ -503,8 +506,10 @@ fn open_restore(
     let mut cold =
         unsafe { Cold::from_pma_offset(&pma, PmaOffsetWords::from_words(cold_off)) };
 
-    // Rebuild the derived/code parts from the RESTORED cold.
-    let hot = Hot::init(&mut stack, URBIT_HOT_STATE);
+    // Rebuild the derived/code parts from the RESTORED cold. The dashboard must
+    // match the one used at boot (stock + Eris jets), or warm would rebind the
+    // restored cold against a different jet set.
+    let hot = Hot::init(&mut stack, &eris_hot_state());
     let test_jets = Hamt::<()>::new(&mut stack);
     let warm = Warm::init(&mut stack, &mut cold, &hot, &test_jets, JetDispatchMode::Exact);
     let cache = Hamt::<Noun>::new(&mut stack);
@@ -592,7 +597,7 @@ fn run_boot(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut inp = std::io::stdin().lock();
         read_frame(&mut inp)?.ok_or("no %boot writ on fd0")?
     };
-    let mut ctx = build_context(NOCK_STACK_SIZE, URBIT_HOT_STATE);
+    let mut ctx = build_context(NOCK_STACK_SIZE, &eris_hot_state());
     let writ = cue_bytes(&mut ctx, &body).map_err(fmt_err)?;
     let tag = atom_str(&ctx, head_of(&ctx, writ)?);
     if tag != "boot" {
@@ -753,8 +758,14 @@ fn run_boot_pill(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let path = path.ok_or("usage: eris-serf boot-pill <file.pill>")?;
     let bytes = std::fs::read(path)?;
     eprintln!("eris-serf boot-pill: {path} ({} bytes)", bytes.len());
-    let mut ctx = build_context(NOCK_STACK_SIZE, URBIT_HOT_STATE);
-    eprintln!("  context: {} hot-state jet entries", URBIT_HOT_STATE.len());
+    let hot_state = eris_hot_state();
+    eprintln!(
+        "  context: {} hot-state jet entries ({} stock + {} eris)",
+        hot_state.len(),
+        URBIT_HOT_STATE.len(),
+        jets::BY_JETS.len()
+    );
+    let mut ctx = build_context(NOCK_STACK_SIZE, &hot_state);
     let t0 = std::time::Instant::now();
     let jammed = Atom::from_bytes(&mut ctx.stack, &bytes);
     let pill = cue(&mut ctx.stack, jammed).map_err(fmt_err)?;

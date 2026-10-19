@@ -17,3 +17,6 @@ path = "src/main.rs"
 
 [dependencies]
 nockvm = { path = "../third_party/nockchain/crates/nockvm/rust/nockvm" }
+# For building `HotEntry` jet-registration paths (`Either::Left`); version
+# matches the nockchain workspace pin so the `HotEntry` type is identical.
+either = "1.9.0"
