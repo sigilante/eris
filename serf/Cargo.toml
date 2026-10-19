@@ -1,0 +1,19 @@
+# Eris mars (serf) — its own Cargo workspace, isolated from the nockchain
+# monorepo. nockvm is path-dep'd into the patched submodule, where
+# patches/nockchain/0001-standalone-nockvm-ws.patch makes crates/nockvm a
+# standalone workspace root. Run `patches/apply.sh nockchain` before building.
+[workspace]
+resolver = "2"
+
+[package]
+name = "eris-serf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "eris-serf"
+path = "src/main.rs"
+
+[dependencies]
+nockvm = { path = "../third_party/nockchain/crates/nockvm/rust/nockvm" }

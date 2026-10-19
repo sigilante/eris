@@ -1,0 +1,7 @@
+# Pinned to match the nockchain pin's toolchain (third_party/nockchain
+# rust-toolchain.toml @ 73877be2: nightly-2026-04-03, rustc 1.96) so the serf
+# builds nockvm reproducibly. Bump in lockstep with the nockchain submodule pin;
+# see PROVENANCE.md / CHANGES.md. (nockvm's own tree also requests `miri`, needed
+# only for its miri test suite, which Eris does not build — omitted here.)
+[toolchain]
+channel = "nightly-2026-04-03"

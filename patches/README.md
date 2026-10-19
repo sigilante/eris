@@ -27,7 +27,16 @@ git checkout .        # discard the edit from the submodule working tree
 ```
 
 (Use `git diff --relative` / `git format-patch` if you prefer; keep paths
-relative to the submodule root so `apply.sh` can apply with `-p1` from inside it.)
+relative to the submodule root so `apply.sh` can apply with `-p1` from inside it.
+For a new file, `git add -N <path>` first so the diff is a proper add.)
+
+### Generated patches
+
+Some patches are produced by a tool, not hand-written — their header says so.
+`patches/nockchain/0001-standalone-nockvm-ws.patch` is emitted by
+`patches/nockchain/regen-standalone-ws.py` (the reconcile-on-bump tool for the
+standalone nockvm workspace). Don't hand-edit it; re-run the generator and
+regenerate the patch. See `docs/build.md` and `CHANGES.md`.
 
 ## Applying
 

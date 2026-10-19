@@ -11,11 +11,22 @@ The deterministic Nock computer. An Eris-original Rust crate that:
   `%ripe` first and answering the writ/plea set in `docs/seam-contract.md`.
 
 We write this crate ourselves against nockvm's public API rather than vendoring
-nockapp, so nockvm stays unpatched and the king/serf boundary logic is Eris's.
+nockapp, so nockvm's source stays pristine in the submodule and the king/serf
+boundary logic is Eris's.
 
-How this crate consumes nockvm (path vs. workspace vs. patched) is deferred to
-the build-system decision — nockvm leans on workspace inheritance
-(`version.workspace`, `ibig.workspace`, a non-member `assert_no_alloc` path dep),
-which shapes the options.
+## How it consumes nockvm (settled)
 
-Empty for now; populated when the build system is settled.
+`serf/` is its own Cargo workspace. It path-deps nockvm into the pinned
+submodule, which is made a **standalone workspace** (fully isolated from the
+nockchain monorepo) by `patches/nockchain/0001-standalone-nockvm-ws.patch`. So:
+
+- **Run `patches/apply.sh nockchain` before `cargo build`** — otherwise the
+  standalone manifest isn't present and Cargo falls back to the monorepo root.
+- The toolchain is pinned in `/rust-toolchain.toml` (`nightly-2026-04-03`, to
+  match the nockchain pin).
+- `serf/Cargo.lock` + the submodule SHA are the reproducible pin.
+
+See `docs/build.md` for the full rationale and the reconcile-on-bump tool.
+
+Skeleton only for now (`src/main.rs` stubs the entry point); populated with the
+newt shim + Serf lifecycle next.
