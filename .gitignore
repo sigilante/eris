@@ -6,6 +6,14 @@ zig-out/
 **/*.o
 **/*.a
 
-# Local scratch
-/.DS_Store
+# Dev ships / piers / snapshots (just dev, boot snap-dirs)
+/pier-*/
+/pier/
+
+# Pills are large (10s of MB); keep them out of the repo
+*.pill
+
+# OS / editor cruft
+.DS_Store
 *.swp
+*~

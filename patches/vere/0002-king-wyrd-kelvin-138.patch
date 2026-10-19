@@ -1,0 +1,19 @@
+diff --git a/pkg/vere/pier.c b/pkg/vere/pier.c
+index a42fe0a43e..494a927380 100644
+--- a/pkg/vere/pier.c
++++ b/pkg/vere/pier.c
+@@ -838,10 +838,10 @@ _pier_wyrd_card(u3_pier* pir_u)
+                      u3i_string(U3_VERE_PACE),
+                      u3dc("scot", c3__ta, u3i_string(URBIT_VERSION)),
+                      u3_nul);
+-  u3_noun kel = u3nl(u3nc(c3__zuse, VERE_ZUSE),  //  XX from both king and serf?
+-                     u3nc(c3__lull, VERE_LULL),  //  XX from both king and serf?
+-                     u3nc(c3__arvo, 234),        //  XX from both king and serf?
+-                     u3nc(c3__hoon, 135),        //  god_u->hon_y
++  u3_noun kel = u3nl(u3nc(c3__zuse, 411),        //  ERIS: 138-era kelvins to match
++                     u3nc(c3__lull, 323),        //  the k138 pill / nockvm jets
++                     u3nc(c3__arvo, 237),        //  (was zuse 408/lull 320/arvo 234/
++                     u3nc(c3__hoon, 138),        //   hoon 135); see patches/vere/0002
+                      u3nc(c3__nock, 4));         //  god_u->noc_y
+   return u3nt(c3__wyrd, u3nc(sen, ver), kel);
+ }

@@ -13,6 +13,7 @@
 //!     and run nockvm's Nock interpreter on it. Proves the mars computes Nock,
 //!     independent of the newt seam. Try it on ~/Code/urbit/benchmark nouns.
 
+use std::io::{Read, Write};
 use std::sync::atomic::AtomicIsize;
 use std::sync::Arc;
 
@@ -24,6 +25,7 @@ use nockvm::jets::hot::{Hot, HotEntry, URBIT_HOT_STATE};
 use nockvm::jets::warm::Warm;
 use nockvm::jets::JetDispatchMode;
 use nockvm::mem::{NockStack, NOCK_STACK_SIZE_TINY, NOCK_STACK_SIZE};
+use nockvm::mug::mug_u32;
 use nockvm::noun::{Atom, Noun, D, T};
 use nockvm::serialization::{cue, jam};
 
@@ -42,10 +44,32 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        // The king spawns us as `eris-serf work|boot <flags>`; the newt seam is
-        // not implemented yet, so report the invocation and exit.
+        // The king spawns us as `eris-serf boot|work <flags>` over the newt pipe.
+        Some("boot") => {
+            let snap = flag(&args, "--snap-dir").unwrap_or(".");
+            if let Err(e) = run_boot(snap) {
+                eprintln!("eris-serf boot: {e}");
+                std::process::exit(1);
+            }
+            // exit 0 == boot success (the king watches the exit status)
+        }
+        Some("work") => {
+            let snap = flag(&args, "--snap-dir").unwrap_or(".");
+            if let Err(e) = run_work(snap) {
+                eprintln!("eris-serf work: {e}");
+                std::process::exit(1);
+            }
+        }
         _ => stub_report(&args),
     }
+}
+
+/// Value of a `--flag <value>` style option from argv, if present.
+fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str)
 }
 
 fn stub_report(args: &[String]) {
@@ -198,12 +222,6 @@ fn atom_str(ctx: &Context, n: Noun) -> String {
     }
 }
 
-fn jam_size(ctx: &mut Context, n: Noun) -> usize {
-    let j = jam(&mut ctx.stack, n);
-    let sp = ctx.stack.noun_space();
-    j.in_space(&sp).to_le_bytes().len()
-}
-
 /// `*[arvo-and-sample [8 [9 23 0 2] 9 2 10 [6 0 7] 0 2]]` — vere `+slam` of the
 /// kernel's axis-23 gate with sample `[now ovum]`. Returns `[effects new-arvo]`.
 fn poke_once(ctx: &mut Context, arvo: Noun, ovum: Noun) -> Result<Noun, Error> {
@@ -242,7 +260,7 @@ fn poke_list(
     arvo: &mut Noun,
     mut list: Noun,
     label: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<usize, Box<dyn std::error::Error>> {
     let mut i = 0usize;
     while list.is_cell() {
         let ovum = head_of(ctx, list)?;
@@ -252,7 +270,7 @@ fn poke_list(
         list = next;
     }
     eprintln!("  {label}: {i} events processed");
-    Ok(())
+    Ok(i)
 }
 
 // ---- synthetic boot prelude (mirrors vere mars.c _mars_boot_make) ----
@@ -335,71 +353,291 @@ fn boot_ovum(stack: &mut NockStack) -> Noun {
     T(stack, &[wire, card])
 }
 
-fn run_boot_pill(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    let path = path.ok_or("usage: eris-serf boot-pill <file.pill>")?;
-    let bytes = std::fs::read(path)?;
-    eprintln!("eris-serf boot-pill: {path} ({} bytes)", bytes.len());
+// ===================================================================
+// newt seam: king-driven boot/work over the stdio pipe (see
+// docs/seam-contract.md). Two process invocations: `boot` consumes one
+// %boot writ, builds the kernel, snapshots, and exits 0 (= success);
+// `work` loads the snapshot, emits %ripe, then serves writs.
+// ===================================================================
 
-    // Jetted (URBIT_HOT_STATE = nockvm's ~136 base-k138 jets) so the Hoon
-    // compiler / stdlib arms accelerate — the whole point of using a k138 pill.
+fn io_err(msg: &str) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, msg.to_string())
+}
+
+/// Read one newt frame (5-byte header: 0x00 + LE u32 len; body = jammed noun).
+/// `Ok(None)` on a clean EOF at a frame boundary.
+fn read_frame<R: Read>(r: &mut R) -> std::io::Result<Option<Vec<u8>>> {
+    let mut hdr = [0u8; 5];
+    let mut got = 0;
+    while got < 5 {
+        match r.read(&mut hdr[got..])? {
+            0 if got == 0 => return Ok(None),
+            0 => return Err(io_err("eof mid-header")),
+            n => got += n,
+        }
+    }
+    if hdr[0] != 0 {
+        return Err(io_err("bad newt version byte"));
+    }
+    let len = u32::from_le_bytes([hdr[1], hdr[2], hdr[3], hdr[4]]) as usize;
+    if len == 0 {
+        return Err(io_err("zero-length newt frame"));
+    }
+    let mut body = vec![0u8; len];
+    r.read_exact(&mut body)?;
+    Ok(Some(body))
+}
+
+fn write_frame<W: Write>(w: &mut W, body: &[u8]) -> std::io::Result<()> {
+    let mut hdr = [0u8; 5]; // hdr[0] = 0 version
+    hdr[1..5].copy_from_slice(&(body.len() as u32).to_le_bytes());
+    w.write_all(&hdr)?;
+    w.write_all(body)?;
+    w.flush()
+}
+
+fn jam_bytes(ctx: &mut Context, n: Noun) -> Vec<u8> {
+    let j = jam(&mut ctx.stack, n);
+    let sp = ctx.stack.noun_space();
+    j.in_space(&sp).to_le_bytes()
+}
+
+fn cue_bytes(ctx: &mut Context, bytes: &[u8]) -> Result<Noun, Error> {
+    let a = Atom::from_bytes(&mut ctx.stack, bytes);
+    cue(&mut ctx.stack, a)
+}
+
+/// Frame a plea noun and write it to fd1 (stdout is the plea channel; all
+/// human output goes to stderr via eprintln).
+fn write_plea(ctx: &mut Context, plea: Noun) -> std::io::Result<()> {
+    let bytes = jam_bytes(ctx, plea);
+    let mut out = std::io::stdout().lock();
+    write_frame(&mut out, &bytes)
+}
+
+fn save_snapshot(
+    ctx: &mut Context,
+    snap_dir: &str,
+    arvo: Noun,
+    eve: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(snap_dir)?;
+    let bytes = jam_bytes(ctx, arvo);
+    let dir = std::path::Path::new(snap_dir);
+    std::fs::write(dir.join("eris.chk"), &bytes)?;
+    std::fs::write(dir.join("eris.eve"), eve.to_string())?;
+    Ok(())
+}
+
+fn load_snapshot(
+    ctx: &mut Context,
+    snap_dir: &str,
+) -> Result<(Noun, u64), Box<dyn std::error::Error>> {
+    let dir = std::path::Path::new(snap_dir);
+    let bytes = std::fs::read(dir.join("eris.chk"))
+        .map_err(|e| format!("no snapshot in {snap_dir}: {e}"))?;
+    let arvo = cue_bytes(ctx, &bytes).map_err(fmt_err)?;
+    let eve = std::fs::read_to_string(dir.join("eris.eve"))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    Ok((arvo, eve))
+}
+
+/// `[%ripe [pro=%2 kel=~] [who=~zod fake=&] [eve mug]]`
+fn make_ripe(ctx: &mut Context, arvo: Noun, eve: u64) -> Noun {
+    let mug = mug_u32(&mut ctx.stack, arvo) as u64;
+    let ripe = mote(&mut ctx.stack, "ripe");
+    let prokel = T(&mut ctx.stack, &[D(2), D(0)]); // [%2 ~]
+    let whofake = T(&mut ctx.stack, &[D(0), D(0)]); // [~zod &]
+    let evemug = T(&mut ctx.stack, &[D(eve), D(mug)]);
+    T(&mut ctx.stack, &[ripe, prokel, whofake, evemug])
+}
+
+/// `[%sync eve mug]`
+fn make_sync(ctx: &mut Context, arvo: Noun, eve: u64) -> Noun {
+    let mug = mug_u32(&mut ctx.stack, arvo) as u64;
+    let sync = mote(&mut ctx.stack, "sync");
+    T(&mut ctx.stack, &[sync, D(eve), D(mug)])
+}
+
+/// Handle `[%poke mil ovum]`: slam the kernel, install, reply
+/// `[%poke [%.y effects]]` (or `[%poke [%.n ~]]` on a Nock crash).
+fn handle_poke(
+    ctx: &mut Context,
+    arvo: &mut Noun,
+    eve: &mut u64,
+    writ: Noun,
+    _snap_dir: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let r1 = tail_of(ctx, writ)?; // [mil ovum]
+    let ovum = tail_of(ctx, r1)?; // [wire card]
+    match poke_once(ctx, *arvo, ovum) {
+        Ok(res) => {
+            let effects = head_of(ctx, res)?;
+            *arvo = tail_of(ctx, res)?;
+            *eve += 1;
+            let poke = mote(&mut ctx.stack, "poke");
+            let inner = T(&mut ctx.stack, &[D(0), effects]); // [%.y effects]
+            let plea = T(&mut ctx.stack, &[poke, inner]);
+            write_plea(ctx, plea)?;
+        }
+        Err(e) => {
+            eprintln!("work: poke crashed: {e}");
+            let poke = mote(&mut ctx.stack, "poke");
+            let inner = T(&mut ctx.stack, &[D(1), D(0)]); // [%.n ~]
+            let plea = T(&mut ctx.stack, &[poke, inner]);
+            write_plea(ctx, plea)?;
+        }
+    }
+    Ok(())
+}
+
+fn run_boot(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("eris-serf boot: snap-dir={snap_dir}; reading %boot writ from fd0");
+    let body = {
+        let mut inp = std::io::stdin().lock();
+        read_frame(&mut inp)?.ok_or("no %boot writ on fd0")?
+    };
     let mut ctx = build_context(NOCK_STACK_SIZE, URBIT_HOT_STATE);
-    eprintln!("  context: {} hot-state jet entries", URBIT_HOT_STATE.len());
+    let writ = cue_bytes(&mut ctx, &body).map_err(fmt_err)?;
+    let tag = atom_str(&ctx, head_of(&ctx, writ)?);
+    if tag != "boot" {
+        return Err(format!("first writ is %{tag}, expected %boot").into());
+    }
+    let com = tail_of(&ctx, writ)?; // [pill vent more]
+    let pill_c = head_of(&ctx, com)?; // [p=@ q=(unit ovum)]
+    let p = head_of(&ctx, pill_c)?; // jammed-pill atom
+    let pill_bytes = {
+        let sp = ctx.stack.noun_space();
+        p.in_space(&sp)
+            .as_atom()
+            .map_err(|_| "pill.p is not an atom")?
+            .to_le_bytes()
+    };
+    eprintln!("eris-serf boot: pill {} bytes; booting", pill_bytes.len());
+    let pill = cue_bytes(&mut ctx, &pill_bytes).map_err(fmt_err)?;
+    let (arvo, eve) = boot_arvo(&mut ctx, pill)?;
+    save_snapshot(&mut ctx, snap_dir, arvo, eve)?;
+    eprintln!("eris-serf boot: booted eve={eve}, snapshot saved; exiting 0");
+    Ok(())
+}
 
-    // Cue the pill.
-    let t0 = std::time::Instant::now();
-    let jammed = Atom::from_bytes(&mut ctx.stack, &bytes);
-    let pill = cue(&mut ctx.stack, jammed).map_err(fmt_err)?;
-    eprintln!("  cued pill in {:.2?}", t0.elapsed());
+fn run_work(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ctx = build_context(NOCK_STACK_SIZE, URBIT_HOT_STATE);
+    let (mut arvo, mut eve) = load_snapshot(&mut ctx, snap_dir)?;
+    eprintln!("eris-serf work: loaded snapshot eve={eve}");
+    let ripe = make_ripe(&mut ctx, arvo, eve);
+    write_plea(&mut ctx, ripe)?;
+    eprintln!("eris-serf work: %ripe sent (eve={eve})");
 
+    let mut inp = std::io::stdin().lock();
+    loop {
+        let body = match read_frame(&mut inp)? {
+            Some(b) => b,
+            None => {
+                eprintln!("eris-serf work: fd0 closed; exiting");
+                break;
+            }
+        };
+        let writ = cue_bytes(&mut ctx, &body).map_err(fmt_err)?;
+        let tag = atom_str(&ctx, head_of(&ctx, writ)?);
+        match tag.as_str() {
+            "poke" => handle_poke(&mut ctx, &mut arvo, &mut eve, writ, snap_dir)?,
+            "peek" => {
+                // v1: reply scry-miss [%peek [%.y ~]].
+                let pk = mote(&mut ctx.stack, "peek");
+                let inr = T(&mut ctx.stack, &[D(0), D(0)]);
+                let pl = T(&mut ctx.stack, &[pk, inr]);
+                write_plea(&mut ctx, pl)?;
+            }
+            "sync" => {
+                save_snapshot(&mut ctx, snap_dir, arvo, eve)?;
+                let pl = make_sync(&mut ctx, arvo, eve);
+                write_plea(&mut ctx, pl)?;
+            }
+            "live" => {
+                let lv = mote(&mut ctx.stack, "live");
+                let pl = T(&mut ctx.stack, &[lv, D(0)]); // [%live ~]
+                write_plea(&mut ctx, pl)?;
+            }
+            "exit" => {
+                save_snapshot(&mut ctx, snap_dir, arvo, eve)?;
+                eprintln!("eris-serf work: %exit; exiting 0");
+                break;
+            }
+            other => eprintln!("eris-serf work: unhandled writ %{other}; ignoring"),
+        }
+    }
+    Ok(())
+}
+
+/// Build + boot an Arvo kernel from an already-cued Vere pill noun.
+/// Returns (arvo, eve) where eve = number of events applied. Shared by the
+/// `boot-pill` dev command and the king-driven `boot` subcommand.
+fn boot_arvo(ctx: &mut Context, pill: Noun) -> Result<(Noun, u64), Box<dyn std::error::Error>> {
     // Destructure [tag typ bot mod use] (unwrapping %cash -> real pill).
-    let tag = head_of(&ctx, pill)?;
-    let tag_s = atom_str(&ctx, tag);
+    let tag = head_of(ctx, pill)?;
+    let tag_s = atom_str(ctx, tag);
     eprintln!("  tag = %{tag_s}");
     if tag_s == "ivory" {
         return Err("ivory pill cannot boot a full ship".into());
     }
-    let mut rest = tail_of(&ctx, pill)?; // [typ bot mod use]
+    let mut rest = tail_of(ctx, pill)?; // [typ bot mod use]
     if tag_s == "cash" {
-        let real = head_of(&ctx, rest)?;
-        rest = tail_of(&ctx, real)?;
+        let real = head_of(ctx, rest)?;
+        rest = tail_of(ctx, real)?;
     }
-    let typ = head_of(&ctx, rest)?;
-    eprintln!("  type = %{}", atom_str(&ctx, typ));
-    let r2 = tail_of(&ctx, rest)?; // [bot mod use]
-    let bot = head_of(&ctx, r2)?;
-    let r3 = tail_of(&ctx, r2)?; // [mod use]
-    let modl = head_of(&ctx, r3)?;
-    let usel = tail_of(&ctx, r3)?;
+    let typ = head_of(ctx, rest)?;
+    eprintln!("  type = %{}", atom_str(ctx, typ));
+    let r2 = tail_of(ctx, rest)?; // [bot mod use]
+    let bot = head_of(ctx, r2)?;
+    let r3 = tail_of(ctx, r2)?; // [mod use]
+    let modl = head_of(ctx, r3)?;
+    let usel = tail_of(ctx, r3)?;
 
-    // Lifecycle: gate = *[bot [2 [0 3] [0 2]]]; arvo = axis 7 of gate.
+    // Lifecycle: arvo = axis 7 of *[bot [2 [0 3] [0 2]]].
     let t1 = std::time::Instant::now();
     let p03 = T(&mut ctx.stack, &[D(0), D(3)]);
     let p02 = T(&mut ctx.stack, &[D(0), D(2)]);
     let lyf = T(&mut ctx.stack, &[D(2), p03, p02]);
-    let gate = interpret(&mut ctx, bot, lyf).map_err(fmt_err)?;
-    let mut arvo = tail_of(&ctx, tail_of(&ctx, gate)?)?;
-    let sz = jam_size(&mut ctx, arvo);
-    eprintln!(
-        "  lifecycle -> base Arvo in {:.2?}  (jam {sz} bytes)",
-        t1.elapsed()
-    );
+    let gate = interpret(ctx, bot, lyf).map_err(fmt_err)?;
+    let mut arvo = tail_of(ctx, tail_of(ctx, gate)?)?;
+    eprintln!("  lifecycle -> base Arvo in {:.2?}", t1.elapsed());
 
-    // Synthetic module prelude (order: wyrd, verb, whom, wack), then the pill's
-    // own module ova, then the legacy %boot event, then the pill's userspace.
+    // Synthetic prelude (wyrd, verb, whom, wack), pill mod, %boot, pill use.
+    let mut eve: u64 = 0;
     let ov = wyrd_ovum(&mut ctx.stack);
-    poke_ovum(&mut ctx, &mut arvo, ov, "wyrd")?;
+    poke_ovum(ctx, &mut arvo, ov, "wyrd")?;
+    eve += 1;
     let ov = verb_ovum(&mut ctx.stack);
-    poke_ovum(&mut ctx, &mut arvo, ov, "verb")?;
+    poke_ovum(ctx, &mut arvo, ov, "verb")?;
+    eve += 1;
     let ov = whom_ovum(&mut ctx.stack);
-    poke_ovum(&mut ctx, &mut arvo, ov, "whom")?;
+    poke_ovum(ctx, &mut arvo, ov, "whom")?;
+    eve += 1;
     let ov = wack_ovum(&mut ctx.stack);
-    poke_ovum(&mut ctx, &mut arvo, ov, "wack")?;
-    poke_list(&mut ctx, &mut arvo, modl, "mod")?;
-
+    poke_ovum(ctx, &mut arvo, ov, "wack")?;
+    eve += 1;
+    eve += poke_list(ctx, &mut arvo, modl, "mod")? as u64;
     let ov = boot_ovum(&mut ctx.stack);
-    poke_ovum(&mut ctx, &mut arvo, ov, "boot")?;
-    poke_list(&mut ctx, &mut arvo, usel, "use")?;
+    poke_ovum(ctx, &mut arvo, ov, "boot")?;
+    eve += 1;
+    eve += poke_list(ctx, &mut arvo, usel, "use")? as u64;
+    Ok((arvo, eve))
+}
 
-    eprintln!("eris-serf boot-pill: all events processed — fakezod booted.");
+fn run_boot_pill(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let path = path.ok_or("usage: eris-serf boot-pill <file.pill>")?;
+    let bytes = std::fs::read(path)?;
+    eprintln!("eris-serf boot-pill: {path} ({} bytes)", bytes.len());
+    let mut ctx = build_context(NOCK_STACK_SIZE, URBIT_HOT_STATE);
+    eprintln!("  context: {} hot-state jet entries", URBIT_HOT_STATE.len());
+    let t0 = std::time::Instant::now();
+    let jammed = Atom::from_bytes(&mut ctx.stack, &bytes);
+    let pill = cue(&mut ctx.stack, jammed).map_err(fmt_err)?;
+    eprintln!("  cued pill in {:.2?}", t0.elapsed());
+    let (_arvo, eve) = boot_arvo(&mut ctx, pill)?;
+    eprintln!("eris-serf boot-pill: fakezod booted (eve={eve}).");
     Ok(())
 }
