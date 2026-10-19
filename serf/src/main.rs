@@ -26,6 +26,8 @@ use nockvm::jets::warm::Warm;
 use nockvm::jets::JetDispatchMode;
 use nockvm::mem::{NockStack, NOCK_STACK_SIZE_TINY, NOCK_STACK_SIZE};
 use nockvm::mug::mug_u32;
+use nockvm::offset::PmaOffsetWords;
+use nockvm::pma::{Pma, PmaCopy};
 use nockvm::noun::{Atom, Noun, D, T};
 use nockvm::serialization::{cue, jam};
 
@@ -415,6 +417,9 @@ fn write_plea(ctx: &mut Context, plea: Noun) -> std::io::Result<()> {
     write_frame(&mut out, &bytes)
 }
 
+/// Persist {kernel, jet cold-state} to a PMA in `snap_dir` (+ a tiny roots
+/// sidecar). Unlike a jam-file, this carries the `Cold` dashboard forward, so
+/// `work` restores with jets warm. Called from `boot` (fresh PMA).
 fn save_snapshot(
     ctx: &mut Context,
     snap_dir: &str,
@@ -422,26 +427,83 @@ fn save_snapshot(
     eve: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(snap_dir)?;
-    let bytes = jam_bytes(ctx, arvo);
     let dir = std::path::Path::new(snap_dir);
-    std::fs::write(dir.join("eris.chk"), &bytes)?;
-    std::fs::write(dir.join("eris.eve"), eve.to_string())?;
+    let pma_path = dir.join("eris.pma");
+    let _ = std::fs::remove_file(&pma_path); // fresh boot snapshot
+    let mut pma = Pma::new(NOCK_STACK_SIZE, pma_path).map_err(|e| format!("pma new: {e:?}"))?;
+
+    let mut arvo = arvo;
+    // Evacuate kernel + cold jet-state into the PMA (mutates them to offset-form).
+    unsafe {
+        arvo.copy_to_pma(&ctx.stack, &mut pma);
+        ctx.cold.copy_to_pma(&ctx.stack, &mut pma);
+    }
+    // Record roots AFTER copy (file-relative, stable across restart).
+    let arvo_raw = unsafe { arvo.as_raw() };
+    let cold_off: u64 = ctx
+        .cold
+        .pma_offset(&pma)
+        .ok_or("cold not in pma after copy")?
+        .into();
+
+    pma.persist_metadata();
+    pma.sync_all()?;
+    pma.sync_file()?;
+
+    let mut buf = [0u8; 24];
+    buf[0..8].copy_from_slice(&arvo_raw.to_le_bytes());
+    buf[8..16].copy_from_slice(&cold_off.to_le_bytes());
+    buf[16..24].copy_from_slice(&eve.to_le_bytes());
+    std::fs::write(dir.join("eris.roots"), buf)?;
     Ok(())
 }
 
-fn load_snapshot(
-    ctx: &mut Context,
+/// Reopen a PMA snapshot into a fresh, jet-warm `Context`: install the arena,
+/// resolve the kernel + `Cold` from recorded offsets, and rebuild `Hot`/`Warm`
+/// from the restored cold (so jet dispatch hits on the first poke). Returns the
+/// context, the live `Pma` (must outlive the context — its mmap backs the
+/// offset nouns), the kernel, and the event number.
+fn open_restore(
     snap_dir: &str,
-) -> Result<(Noun, u64), Box<dyn std::error::Error>> {
+) -> Result<(Context, Pma, Noun, u64), Box<dyn std::error::Error>> {
     let dir = std::path::Path::new(snap_dir);
-    let bytes = std::fs::read(dir.join("eris.chk"))
-        .map_err(|e| format!("no snapshot in {snap_dir}: {e}"))?;
-    let arvo = cue_bytes(ctx, &bytes).map_err(fmt_err)?;
-    let eve = std::fs::read_to_string(dir.join("eris.eve"))
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0);
-    Ok((arvo, eve))
+    let pma = Pma::open(dir.join("eris.pma")).map_err(|e| format!("pma open: {e:?}"))?;
+    let roots = std::fs::read(dir.join("eris.roots")).map_err(|e| format!("no roots: {e}"))?;
+    if roots.len() < 24 {
+        return Err("roots sidecar too short".into());
+    }
+    let arvo_raw = u64::from_le_bytes(roots[0..8].try_into().unwrap());
+    let cold_off = u64::from_le_bytes(roots[8..16].try_into().unwrap());
+    let eve = u64::from_le_bytes(roots[16..24].try_into().unwrap());
+
+    let mut stack = NockStack::new(NOCK_STACK_SIZE, 0);
+    stack.install_pma_arena(Arc::clone(pma.arena())); // MUST precede resolving PMA nouns
+    let arvo = unsafe { Noun::from_raw(arvo_raw) };
+    let mut cold =
+        unsafe { Cold::from_pma_offset(&pma, PmaOffsetWords::from_words(cold_off)) };
+
+    // Rebuild the derived/code parts from the RESTORED cold.
+    let hot = Hot::init(&mut stack, URBIT_HOT_STATE);
+    let test_jets = Hamt::<()>::new(&mut stack);
+    let warm = Warm::init(&mut stack, &mut cold, &hot, &test_jets, JetDispatchMode::Exact);
+    let cache = Hamt::<Noun>::new(&mut stack);
+    let arena = stack.arena().clone();
+    let ctx = Context {
+        stack,
+        op_budget: None,
+        jet_dispatch: JetDispatchMode::Exact,
+        slogger: Box::pin(NullSlogger),
+        cold,
+        warm,
+        hot,
+        cache,
+        scry_stack: D(0),
+        trace_info: None,
+        running_status: Arc::new(AtomicIsize::new(NockCancelToken::RUNNING_IDLE)),
+        test_jets,
+        arena,
+    };
+    Ok((ctx, pma, arvo, eve))
 }
 
 /// `[%ripe [pro=%2 kel=~] [who=~zod fake=&] [eve mug]]`
@@ -524,9 +586,9 @@ fn run_boot(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_work(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ctx = build_context(NOCK_STACK_SIZE, URBIT_HOT_STATE);
-    let (mut arvo, mut eve) = load_snapshot(&mut ctx, snap_dir)?;
-    eprintln!("eris-serf work: loaded snapshot eve={eve}");
+    // `_pma` must outlive `ctx`: its mmap backs the restored offset-form nouns.
+    let (mut ctx, _pma, mut arvo, mut eve) = open_restore(snap_dir)?;
+    eprintln!("eris-serf work: restored from PMA (eve={eve}), jets warm");
     let ripe = make_ripe(&mut ctx, arvo, eve);
     write_plea(&mut ctx, ripe)?;
     eprintln!("eris-serf work: %ripe sent (eve={eve})");
@@ -551,8 +613,10 @@ fn run_work(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
                 let pl = T(&mut ctx.stack, &[pk, inr]);
                 write_plea(&mut ctx, pl)?;
             }
+            // v1: ack only. Durable re-snapshot of post-boot live events (which
+            // needs same-PMA re-persist) is a follow-up; the boot snapshot is the
+            // durable baseline.
             "sync" => {
-                save_snapshot(&mut ctx, snap_dir, arvo, eve)?;
                 let pl = make_sync(&mut ctx, arvo, eve);
                 write_plea(&mut ctx, pl)?;
             }
@@ -562,7 +626,6 @@ fn run_work(snap_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
                 write_plea(&mut ctx, pl)?;
             }
             "exit" => {
-                save_snapshot(&mut ctx, snap_dir, arvo, eve)?;
                 eprintln!("eris-serf work: %exit; exiting 0");
                 break;
             }
