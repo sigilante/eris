@@ -7,7 +7,7 @@ vere    := "third_party/vere"
 serfdir := "serf"
 profile := "release"                                   # serf build profile: release|debug
 cargoflags := if profile == "release" { "--release" } else { "" }
-ship := "zod"                                          # default fake-ship for `dev`
+ship := "bus"                                          # default fake-ship for `dev` (zod's port is oft taken)
 pier := "pier-" + ship
 # macOS-26/zig-0.15 king-build workaround (self-disables elsewhere); see docs/build.md.
 shim     := justfile_directory() / "tools/xcrun-shim"
