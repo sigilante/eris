@@ -216,6 +216,27 @@ fn poke_once(ctx: &mut Context, arvo: Noun, ovum: Noun) -> Result<Noun, Error> {
     interpret(ctx, sub, fol)
 }
 
+/// Poke one ovum `[wire card]` into Arvo, install the new kernel, log timing.
+fn poke_ovum(
+    ctx: &mut Context,
+    arvo: &mut Noun,
+    ovum: Noun,
+    label: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let t = std::time::Instant::now();
+    match poke_once(ctx, *arvo, ovum) {
+        Ok(res) => {
+            *arvo = tail_of(ctx, res)?;
+            eprintln!("  {label} ok in {:.2?}", t.elapsed());
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("  {label} CRASH after {:.2?}: {e}", t.elapsed());
+            Err(format!("poke {label} crashed").into())
+        }
+    }
+}
+
 fn poke_list(
     ctx: &mut Context,
     arvo: &mut Noun,
@@ -226,22 +247,92 @@ fn poke_list(
     while list.is_cell() {
         let ovum = head_of(ctx, list)?;
         let next = tail_of(ctx, list)?;
-        let t = std::time::Instant::now();
-        match poke_once(ctx, *arvo, ovum) {
-            Ok(res) => {
-                *arvo = tail_of(ctx, res)?;
-                eprintln!("  {label}[{i}] ok in {:.2?}", t.elapsed());
-            }
-            Err(e) => {
-                eprintln!("  {label}[{i}] CRASH after {:.2?}: {e}", t.elapsed());
-                return Err(format!("poke {label}[{i}] crashed").into());
-            }
-        }
+        poke_ovum(ctx, arvo, ovum, &format!("{label}[{i}]"))?;
         i += 1;
         list = next;
     }
     eprintln!("  {label}: {i} events processed");
     Ok(())
+}
+
+// ---- synthetic boot prelude (mirrors vere mars.c _mars_boot_make) ----
+
+/// A `@tas`/`@t` mote from ASCII bytes (little-endian cord). `""` -> `0` (%$).
+fn mote(stack: &mut NockStack, s: &str) -> Noun {
+    if s.is_empty() {
+        D(0)
+    } else {
+        Atom::from_bytes(stack, s.as_bytes()).as_noun()
+    }
+}
+
+/// `[%$ %arvo ~]` — the wire for module (kernel) ova.
+fn arvo_wire(stack: &mut NockStack) -> Noun {
+    let arvo = mote(stack, "arvo");
+    T(stack, &[D(0), arvo, D(0)])
+}
+
+/// `[wire [%wyrd [sen ver] kel]]` — runtime kelvin negotiation. `kel` must
+/// match the pill's Arvo (zuse 411 / lull 323 / arvo 237 / hoon 138 / nock 4).
+fn wyrd_ovum(stack: &mut NockStack) -> Noun {
+    let wire = arvo_wire(stack);
+    let zuse = mote(stack, "zuse");
+    let z = T(stack, &[zuse, D(411)]);
+    let lull = mote(stack, "lull");
+    let l = T(stack, &[lull, D(323)]);
+    let arvo = mote(stack, "arvo");
+    let a = T(stack, &[arvo, D(237)]);
+    let hoon = mote(stack, "hoon");
+    let h = T(stack, &[hoon, D(138)]);
+    let nock = mote(stack, "nock");
+    let n = T(stack, &[nock, D(4)]);
+    let kel = T(stack, &[z, l, a, h, n, D(0)]); // (list weft), null-terminated
+    let vere = mote(stack, "vere");
+    let pace = mote(stack, "live");
+    let vers = mote(stack, "~.eris");
+    let ver = T(stack, &[vere, pace, vers, D(0)]); // path [%vere %live ~.eris ~]
+    let sen = mote(stack, "0v1s.vu178");
+    let senver = T(stack, &[sen, ver]);
+    let wyrd = mote(stack, "wyrd");
+    let card = T(stack, &[wyrd, senver, kel]);
+    T(stack, &[wire, card])
+}
+
+/// `[wire [%verb ~ |]]` — verbosity off.
+fn verb_ovum(stack: &mut NockStack) -> Noun {
+    let wire = arvo_wire(stack);
+    let verb = mote(stack, "verb");
+    let card = T(stack, &[verb, D(0), D(1)]);
+    T(stack, &[wire, card])
+}
+
+/// `[wire [%whom ~zod]]` — identity. ~zod = @p 0.
+fn whom_ovum(stack: &mut NockStack) -> Noun {
+    let wire = arvo_wire(stack);
+    let whom = mote(stack, "whom");
+    let card = T(stack, &[whom, D(0)]);
+    T(stack, &[wire, card])
+}
+
+/// `[wire [%wack eny]]` — entropy (34 bytes = 17 half-words, per mars.c).
+fn wack_ovum(stack: &mut NockStack) -> Noun {
+    let wire = arvo_wire(stack);
+    let wack = mote(stack, "wack");
+    let eny = Atom::from_bytes(stack, &[0xA5u8; 34]).as_noun();
+    let card = T(stack, &[wack, eny]);
+    T(stack, &[wire, card])
+}
+
+/// `[[%d %term '1' ~] [%boot | [%fake ~zod]]]` — legacy fakezod boot event.
+fn boot_ovum(stack: &mut NockStack) -> Noun {
+    let d = mote(stack, "d");
+    let term = mote(stack, "term");
+    let wire = T(stack, &[d, term, D(0x31), D(0)]); // [%d %term '1' ~]
+    let fake = mote(stack, "fake");
+    let vent = T(stack, &[fake, D(0)]); // [%fake ~zod]
+    let boot = mote(stack, "boot");
+    let card = T(stack, &[boot, D(1), vent]); // [%boot %.n vent]  (not lite)
+    T(stack, &[wire, card])
 }
 
 fn run_boot_pill(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
@@ -293,10 +384,22 @@ fn run_boot_pill(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         t1.elapsed()
     );
 
-    // Poke module events, then userspace events.
+    // Synthetic module prelude (order: wyrd, verb, whom, wack), then the pill's
+    // own module ova, then the legacy %boot event, then the pill's userspace.
+    let ov = wyrd_ovum(&mut ctx.stack);
+    poke_ovum(&mut ctx, &mut arvo, ov, "wyrd")?;
+    let ov = verb_ovum(&mut ctx.stack);
+    poke_ovum(&mut ctx, &mut arvo, ov, "verb")?;
+    let ov = whom_ovum(&mut ctx.stack);
+    poke_ovum(&mut ctx, &mut arvo, ov, "whom")?;
+    let ov = wack_ovum(&mut ctx.stack);
+    poke_ovum(&mut ctx, &mut arvo, ov, "wack")?;
     poke_list(&mut ctx, &mut arvo, modl, "mod")?;
+
+    let ov = boot_ovum(&mut ctx.stack);
+    poke_ovum(&mut ctx, &mut arvo, ov, "boot")?;
     poke_list(&mut ctx, &mut arvo, usel, "use")?;
 
-    eprintln!("eris-serf boot-pill: all events processed.");
+    eprintln!("eris-serf boot-pill: all events processed — fakezod booted.");
     Ok(())
 }
