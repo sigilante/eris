@@ -22,7 +22,79 @@ use nockvm::jets::hot::{HotEntry, K_138, URBIT_HOT_STATE};
 pub mod bits;
 pub mod list;
 pub mod map;
+pub mod ob;
+pub mod po;
 pub mod set;
+pub mod text;
+
+/// The chapter-`qua` text arms `scot`/`slaw`: path `[k138 one two tri qua
+/// <arm>]`, axis 1.
+pub static TEXT_JETS: &[HotEntry] = &[
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"tri"), Left(b"qua"), Left(b"scot")],
+        1,
+        text::jet_scot,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"tri"), Left(b"qua"), Left(b"slaw")],
+        1,
+        text::jet_slaw,
+    ),
+];
+
+/// The `+po` syllable-table arms (`ind ins tod tos`). `+po` is a child of
+/// chapter `qua`: path `[k138 one two tri qua po <arm>]`, axis 1.
+pub static PO_JETS: &[HotEntry] = &[
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"tri"), Left(b"qua"), Left(b"po"), Left(b"ind")],
+        1,
+        po::jet_po_ind,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"tri"), Left(b"qua"), Left(b"po"), Left(b"ins")],
+        1,
+        po::jet_po_ins,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"tri"), Left(b"qua"), Left(b"po"), Left(b"tod")],
+        1,
+        po::jet_po_tod,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"tri"), Left(b"qua"), Left(b"po"), Left(b"tos")],
+        1,
+        po::jet_po_tos,
+    ),
+];
+
+/// The `+ob` @p-obfuscation arms (`fein`/`fynd`). The `+ob` core is a child of
+/// chapter `tri`, so the path is `[k138 one two tri ob <arm>]`, axis 1.
+pub static OB_JETS: &[HotEntry] = &[
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"ob"),
+            Left(b"fein"),
+        ],
+        1,
+        ob::jet_fein,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"ob"),
+            Left(b"fynd"),
+        ],
+        1,
+        ob::jet_fynd,
+    ),
+];
 
 /// Chapter-`two` `+list` helper gates (`welp slag need reel skim skip skid murn
 /// lien sort`) and atom/bit helpers (`swp pow`). Each is a plain gate, jetted at
@@ -88,6 +160,31 @@ pub static LIST_JETS: &[HotEntry] = &[
         &[K_138, Left(b"one"), Left(b"two"), Left(b"pow")],
         1,
         bits::jet_pow,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"aor")],
+        1,
+        bits::jet_aor,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"mat")],
+        1,
+        bits::jet_mat,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"rub")],
+        1,
+        bits::jet_rub,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"muk")],
+        1,
+        bits::jet_muk,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"mate")],
+        1,
+        list::jet_mate,
     ),
 ];
 
@@ -285,5 +382,8 @@ pub fn eris_hot_state() -> Vec<HotEntry> {
     entries.extend_from_slice(BY_JETS);
     entries.extend_from_slice(IN_JETS);
     entries.extend_from_slice(LIST_JETS);
+    entries.extend_from_slice(OB_JETS);
+    entries.extend_from_slice(PO_JETS);
+    entries.extend_from_slice(TEXT_JETS);
     entries
 }

@@ -19,6 +19,42 @@ Entry format:
 
 ---
 
+## 2026-10-20 — Serf jets: gap buckets 1–3 (`+po`, `+ob`, `scot`/`slaw`, atom helpers)
+- **Scope:** serf
+- **Upstream touched:** (none — Eris-owned, `serf/src/jets/{bits,list,ob,po,text}.rs`)
+- **Mechanism:** new code (new modules `ob`, `po`, `text`; additions to `bits`,
+  `list`), registered via `OB_JETS`/`PO_JETS`/`TEXT_JETS` + extensions to
+  `LIST_JETS` in `jets::eris_hot_state()`. Two new deps (`ibig`, `murmur3`),
+  path-pinned to nockvm's own forks so `UBig`/`Atom` interop and the hash
+  matches `+mug`.
+- **What:** Closed 13 of the ~60 remaining gap arms vs. Vere, in three buckets:
+  - **list/atom helpers** (`bits.rs`+`list.rs`): `aor` (a-order comparator),
+    `mat`/`rub` (jam length encode/decode, via ibig bignum — tested as exact
+    inverses), `muk` (murmur3, == `+mug`'s hash, with Vere's key zero-padding),
+    `mate` (unit merge).
+  - **`+ob`** (`ob.rs`): `fein`/`fynd`, the `@p` Feistel scramble/unscramble
+    (ported from Vere `e/{fein,fynd}_ob.c`; murmur3 rounds; tested as inverses).
+  - **`+po`** (`po.rs`): `ind`/`ins`/`tod`/`tos`, the `@p` syllable tables
+    (both 256-entry prefix/suffix tables copied verbatim from Vere `c/po.c` and
+    length-checked).
+  - **`scot`/`slaw`** (`text.rs`): render/parse `dime`s. Like Vere, jet only the
+    common auras and `Punt` the rest (always correct): `scot` does
+    `%tas %ud %ux %uv %uw`; `slaw` does `%ud %tas` (Vere's `%da`/`%p` need the
+    `+ob`/date Hoon helpers, so we Punt them). Round-trip tested.
+  - Registration paths follow the chapter nesting (`one two tri qua ...`): `ob`
+    under `tri`, `po`/`scot`/`slaw` under `qua`, the rest direct `two` arms.
+  20 new tests (70 jet tests total) pass; full boot-pill reaches `use[0]`.
+- **Why:** These were the cheapest, highest-confidence gap closures (pure/table
+  logic + `Punt`-safe partial coverage). Per the profiling they are coverage,
+  not a boot-speed lever; load-bearing for `@p`/number/path formatting in
+  userspace. Deferred (per the gap analysis): `@r` floats, the crypto bucket,
+  the `ut` type helpers, and `scot`/`slaw`'s `%da`/`%p` (run unjetted, correct).
+- **Re-apply risk:** none (additive). On a nockchain bump re-check the ibig
+  (`UBig::{from_le_bytes,to_le_bytes,pow_stack}`, `Atom::{as_ubig,from_ubig}`)
+  and `murmur3::murmur3_32_of_slice` APIs, `bits::util::{met,bex,lsh,con}`, and
+  that the `+po` tables still match Vere's `c/po.c`. Same kelvin/path caveats as
+  the `+by` entry; `muk`'s seed is `(end 5 syd)` = low 32 bits.
+
 ## 2026-10-20 — Serf jets: fix `+by`/`+in` `wyt` subject axis (trap, not gate)
 - **Scope:** serf
 - **Upstream touched:** (none — Eris-owned, `serf/src/jets/{map,set}.rs`)

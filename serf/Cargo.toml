@@ -20,3 +20,8 @@ nockvm = { path = "../third_party/nockchain/crates/nockvm/rust/nockvm" }
 # For building `HotEntry` jet-registration paths (`Either::Left`); version
 # matches the nockchain workspace pin so the `HotEntry` type is identical.
 either = "1.9.0"
+# nockvm's own forks (same path, so Cargo unifies the crate with nockvm's dep —
+# `UBig` interops with `Atom::{as_ubig,from_ubig}`). ibig: arbitrary-precision
+# bit math for `+mat`/`+rub`. murmur3: the hash behind `+muk` (== nockvm's mug).
+ibig = { path = "../third_party/nockchain/crates/nockvm/rust/ibig" }
+murmur3 = { path = "../third_party/nockchain/crates/nockvm/rust/murmur3" }

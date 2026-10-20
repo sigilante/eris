@@ -26,6 +26,7 @@ use nockvm::jets::util::{slam, slot};
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Noun, NounSpace, D, NO, T, YES};
+use nockvm::unifying_equality::unifying_equality;
 
 type JetResult<T> = std::result::Result<T, JetErr>;
 
@@ -131,6 +132,34 @@ pub fn jet_need(context: &mut Context, subject: Noun) -> Result {
         return Err(JetErr::Punt);
     }
     slot(unit, 3, &space)
+}
+
+/// `+mate`: choose between two units, crashing if both are set and differ.
+/// hoon: `|* [a=(unit) b=(unit)]`: `~` for b → a, `~` for a → b, else equal
+/// values → a, else `%mean 'mate'`. Cribbed from Vere's `u3qb_mate`. On the
+/// mismatch (crash) path we `Punt` so the Nock raises the mean.
+pub fn jet_mate(context: &mut Context, subject: Noun) -> Result {
+    let space = context.stack.noun_space();
+    let sam = sample(subject, &space)?;
+    let a = slot(sam, 2, &space)?;
+    let b = slot(sam, 3, &space)?;
+    if b.is_atom() {
+        return Ok(a); // b is ~
+    }
+    if a.is_atom() {
+        return Ok(b); // a is ~
+    }
+    // both [~ u]: compare the values (axis 3 of each unit).
+    let ua = slot(a, 3, &space)?;
+    let ub = slot(b, 3, &space)?;
+    let mut ua = ua;
+    let mut ub = ub;
+    if unsafe { unifying_equality(&mut context.stack, &mut ua as *mut Noun, &mut ub as *mut Noun) }
+    {
+        Ok(a)
+    } else {
+        Err(JetErr::Punt)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +370,27 @@ mod tests {
         // (need [~ 42]) -> 42
         let unit = T(&mut c.stack, &[D(0), D(42)]);
         assert_jet(c, jet_need, unit, D(42));
+    }
+
+    #[test]
+    fn test_mate() {
+        let c = &mut init_context();
+        // (mate [~ 5] ~) -> [~ 5]
+        let u5 = T(&mut c.stack, &[D(0), D(5)]);
+        let sam = T(&mut c.stack, &[u5, D(0)]);
+        let want = T(&mut c.stack, &[D(0), D(5)]);
+        assert_jet(c, jet_mate, sam, want);
+        // (mate ~ [~ 5]) -> [~ 5]
+        let u5b = T(&mut c.stack, &[D(0), D(5)]);
+        let sam = T(&mut c.stack, &[D(0), u5b]);
+        let want = T(&mut c.stack, &[D(0), D(5)]);
+        assert_jet(c, jet_mate, sam, want);
+        // (mate [~ 5] [~ 5]) -> [~ 5]
+        let ua = T(&mut c.stack, &[D(0), D(5)]);
+        let ub = T(&mut c.stack, &[D(0), D(5)]);
+        let sam = T(&mut c.stack, &[ua, ub]);
+        let want = T(&mut c.stack, &[D(0), D(5)]);
+        assert_jet(c, jet_mate, sam, want);
     }
 
     // --- gate-slamming arms ---------------------------------------------

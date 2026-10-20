@@ -100,19 +100,38 @@ is **never patched**. All pinned to Hoon **k138** (`K_138`), the pill's kelvin.
   bites when the arm actually fires on real data (it crashed a boot). See
   `CHANGES.md` 2026-10-20 (`wyt` fix).
 - **`list.rs` — chapter-`two` `+list` helpers** (`welp slag need reel skim skip
-  skid murn lien sort`) and **`bits.rs` — atom/bit helpers** (`swp pow`). These
-  are standard-library arms a stock k138 pill uses that nockvm's dashboard omits
-  (Nockchain's kernels don't need them). *Where they come from:* ported from
-  Vere's C jets (`pkg/noun/jets/b/{sort,reel,skid,…}.c`, `c/{swp,pow}.c`) and
-  hoon.hoon, in nockvm's house style. The gate-slamming arms apply the sample
-  gate via `jets::util::slam` (= Vere's `u3j_gate_slam`); `sort` is Vere's
-  first-pivot quicksort. `swp` reuses nockvm's public `bits::util::rip`/`bits::rep`
-  so the bit-slicing is byte-identical to the stock jets; `pow` uses ibig's
-  `UBig::pow_stack` (loom-allocated, type used by inference so no new dep).
-  Registered via `LIST_JETS`; plain gates at `[k138 one two <arm>]`, axis 1.
-  Differential tests vs. Rust oracles + the real boot-pill. *Per the profiling
-  (see `docs/architecture.md`), these are coverage/correctness for map/set/list-
-  heavy steady-state, not a boot-speed lever.*
+  skid murn lien sort mate`) and **`bits.rs` — atom/bit helpers** (`swp pow aor
+  mat muk rub`). These are standard-library arms a stock k138 pill uses that
+  nockvm's dashboard omits (Nockchain's kernels don't need them). *Where they
+  come from:* ported from Vere's C jets (`pkg/noun/jets/b/{sort,reel,skid,mate,
+  …}.c`, `c/{swp,pow,aor,muk}.c`, `e/{mat,rub}.c`) and hoon.hoon, in nockvm's
+  house style. The gate-slamming arms apply the sample gate via `jets::util::slam`
+  (= Vere's `u3j_gate_slam`); `sort` is Vere's first-pivot quicksort. `swp`
+  reuses nockvm's public `bits::util::rip`/`bits::rep` so the bit-slicing is
+  byte-identical to the stock jets; `pow`/`mat`/`rub` do arbitrary-precision math
+  via ibig (nockvm's fork; `mat`/`rub` are tested as exact inverses); `muk` is
+  murmur3 (the `murmur3` crate, == `+mug`'s hash). Registered via `LIST_JETS`;
+  plain gates at `[k138 one two <arm>]`, axis 1.
+- **`ob.rs` — the `+ob` `@p` obfuscator** (`fein`/`fynd`): the Feistel cipher
+  that spreads adjacent planet/moon numbers across the name space. Ported from
+  Vere `e/{fein,fynd}_ob.c` (murmur3 rounds over 32-bit halves). `+ob` is a child
+  of `tri`: path `[k138 one two tri ob <arm>]`. Tested as inverses.
+- **`po.rs` — the `+po` syllable tables** (`ind ins tod tos`): the 256-entry
+  prefix/suffix syllable tables (`tos`/`ins` prefix, `tod`/`ind` suffix; `to*`
+  index→syllable, `in*` syllable→`(unit index)`). Tables copied verbatim from
+  Vere `c/po.c` and length-checked. `+po` is a child of `qua`: path `[k138 one
+  two tri qua po <arm>]`.
+- **`text.rs` — `scot`/`slaw`** (render/parse `dime`s): like Vere, jet only the
+  common auras and `Punt` the rest (partial coverage is always correct). `scot`:
+  `%tas %ud %ux %uv %uw`; `slaw`: `%ud %tas` (Vere's `%da`/`%p` need the `+ob`/
+  date Hoon helpers; we Punt them). Ported from Vere `e/{scot,slaw}.c` (+ the
+  `u3s_etch_*`/`u3s_sift_*` in `serial.c`). Chapter `qua`: path `[k138 one two
+  tri qua <arm>]`.
+  All registered WITHOUT patching nockvm. Differential/round-trip tests vs. Rust
+  oracles + the real boot-pill. *Per the profiling (see `docs/architecture.md`),
+  these are coverage/correctness (esp. `@p`/number/path formatting), not a
+  boot-speed lever.* Deferred gap buckets: `@r` floats (a SoftFloat Rust-jet
+  reference exists in the `numerics` repo), crypto, and the `ut` type helpers.
 
 ## Compatibility facts that make the graft sound (verified, keep current)
 
