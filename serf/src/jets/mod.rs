@@ -27,6 +27,42 @@ pub mod ob;
 pub mod po;
 pub mod set;
 pub mod text;
+pub mod ut;
+
+macro_rules! ut_arm {
+    ($name:literal, $jet:expr) => {
+        (
+            &[
+                K_138,
+                Left(b"one"),
+                Left(b"two"),
+                Left(b"tri"),
+                Left(b"qua"),
+                Left(b"pen"),
+                Left($name),
+            ],
+            1,
+            $jet as nockvm::jets::Jet,
+        )
+    };
+}
+
+/// The `+ut` chapter-`pen` type helpers. Path `[k138 one two tri qua pen
+/// <arm>]`, axis 1.
+pub static UT_JETS: &[HotEntry] = &[
+    ut_arm!(b"cell", ut::jet_cell),
+    ut_arm!(b"comb", ut::jet_comb),
+    ut_arm!(b"cons", ut::jet_cons),
+    ut_arm!(b"core", ut::jet_core),
+    ut_arm!(b"face", ut::jet_face),
+    ut_arm!(b"fitz", ut::jet_fitz),
+    ut_arm!(b"flan", ut::jet_flan),
+    ut_arm!(b"flip", ut::jet_flip),
+    ut_arm!(b"flor", ut::jet_flor),
+    ut_arm!(b"fork", ut::jet_fork),
+    ut_arm!(b"look", ut::jet_look),
+    ut_arm!(b"loot", ut::jet_loot),
+];
 
 /// The chapter-`qua` text arms `scot`/`slaw`: path `[k138 one two tri qua
 /// <arm>]`, axis 1.
@@ -387,5 +423,6 @@ pub fn eris_hot_state() -> Vec<HotEntry> {
     entries.extend_from_slice(PO_JETS);
     entries.extend_from_slice(TEXT_JETS);
     entries.extend_from_slice(flot::HOON_FLOAT_HOT);
+    entries.extend_from_slice(UT_JETS);
     entries
 }

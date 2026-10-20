@@ -19,6 +19,36 @@ Entry format:
 
 ---
 
+## 2026-10-20 — Serf jets: the `+ut` type helpers (chapter `pen`)
+- **Scope:** serf
+- **Upstream touched:** (none — Eris-owned, `serf/src/jets/ut.rs`)
+- **Mechanism:** new module `ut`, registered via `UT_JETS` in
+  `jets::eris_hot_state()`
+- **What:** Jet the 12 secondary type/formula operators the Hoon compiler uses —
+  `cell face core` (type constructors), `cons comb` (formula folding/compose),
+  `flip flan flor` (loobean-formula logic), `fitz` (kelvin compat), `fork`
+  (union type), and `look loot` (resolve a name in a type's symbol table). Ported
+  from Vere's `pkg/noun/jets/f/*.c`; plain gates at `[k138 one two tri qua pen
+  <arm>]`. `fork` reuses our `+in` set-union/put (`set::set_uni`/`set_put`, now
+  `pub(crate)`); `look`/`loot` are recursive treap walks building axes with a
+  ported `+peg` (over ibig, since axes can exceed 64 bits). The hot compiler core
+  (`mint`/`mull`/`nest`/`mink`/`mole`/`fuse`/`fish`/`crop`) was already jetted by
+  nockvm; these are the remaining `+ut` leaves.
+- **Why:** The `ut` gap bucket. `look`/`loot`/`cell`/`comb` fire on every variable
+  reference and type construction the compiler does, so the full boot-pill
+  exercises them directly (a faithful port is the bar — a wrong one crashes the
+  compile, as the `wyt` bug did). That bar caught a real bug: the boot crashed at
+  `wack` until `loot` was fixed to pass the **inner map** of a `tome` to `look`.
+  The k138 pill's `tome` is the pair `[p=what q=(map term hoon)]`, so `loot` must
+  look in `q.tome`, not the whole `tome` (Vere's C `u3t(n_dom)` targets a
+  bare-map `tome`; the pill uses the pair form). 8 new tests (constructors +
+  `look`/`loot` incl. the pair-tome shape); full boot reaches `use[0]` and
+  `fakezod booted (eve=6)`, exit 0.
+- **Re-apply risk:** none (additive). On a bump re-check `sort::util::gor`,
+  `bits::util::met`, `set::{set_put,set_uni}` visibility, and the type-mote
+  shapes (`%cell`/`%core`/`%face`/`%fork`/`%void`). Per the profiling these are
+  coverage, not a boot-speed lever. Same kelvin/path caveats as the `+by` entry.
+
 ## 2026-10-20 — Serf jets: the `@r` float doors (`+rs`/`+rd`/`+rh`/`+rq`)
 - **Scope:** serf
 - **Upstream touched:** (none — Eris-owned, `serf/src/jets/flot.rs`)

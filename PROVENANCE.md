@@ -139,11 +139,20 @@ is **never patched**. All pinned to Hoon **k138** (`K_138`), the pill's kelvin.
   SoftFloat) — the one Eris dependency fetched from outside the vendored
   submodules, rev-pinned in `serf/Cargo.toml`. Rounding mode at axis 30; chapter
   `tri`, path `[k138 one two tri <door> <arm>]`.
+- **`ut.rs` — the `+ut` type helpers** (chapter `pen`): `cell face core` (type
+  constructors), `cons comb` (formula folding/compose), `flip flan flor`
+  (loobean-formula logic), `fitz` (kelvin compat), `fork` (union type, reusing
+  our `+in` `set::set_uni`/`set_put`), and `look loot` (resolve a name in a
+  type's symbol table, recursive treap walks with a ported `+peg` over ibig).
+  Ported from Vere `f/*.c`; path `[k138 one two tri qua pen <arm>]`. These fire
+  in every compile, so the boot-pill is the real test — it caught that the k138
+  pill's `tome` is the pair `[what (map term hoon)]`, so `loot` looks in the
+  inner map (`q.tome`), not the whole tome.
   All registered WITHOUT patching nockvm. Differential/round-trip tests vs. Rust
   oracles + the real boot-pill. *Per the profiling (see `docs/architecture.md`),
-  these are coverage/correctness (esp. `@p`/number/path formatting and
-  userspace float math), not a boot-speed lever.* Deferred gap bucket: crypto
-  (and `scot`/`slaw`'s minor auras). The `ut` type helpers are the next target.
+  these are coverage/correctness (esp. `@p`/number/path formatting, userspace
+  float math, and compiler type-ops), not a boot-speed lever.* **Remaining gap
+  bucket: crypto** (plus `scot`/`slaw`'s minor auras) — deferred.
 
 ## Compatibility facts that make the graft sound (verified, keep current)
 

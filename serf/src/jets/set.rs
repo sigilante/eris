@@ -199,7 +199,7 @@ fn set_bif(
 }
 
 /// `+uni:in`: union.
-fn set_uni(stack: &mut NockStack, a: Noun, b: Noun, space: &NounSpace) -> JetResult<Noun> {
+pub(crate) fn set_uni(stack: &mut NockStack, a: Noun, b: Noun, space: &NounSpace) -> JetResult<Noun> {
     if noun_eq(stack, a, b) {
         return Ok(a);
     }
