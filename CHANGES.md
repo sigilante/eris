@@ -37,14 +37,13 @@ Entry format:
   - **`+po`** (`po.rs`): `ind`/`ins`/`tod`/`tos`, the `@p` syllable tables
     (both 256-entry prefix/suffix tables copied verbatim from Vere `c/po.c` and
     length-checked).
-  - **`scot`/`slaw`** (`text.rs`): render/parse `dime`s. Like Vere, jet only the
+  - **`scot`/`slaw`** (`text.rs`): render/parse `dime`s. Like Vere, jet the
     common auras and `Punt` the rest (always correct): `scot` does
-    `%tas %ud %ux %uv %uw`; `slaw` does `%ud %tas %p` (`%p` composes the new
-    `+po`/`+ob` jets to parse ship names). `slaw %da` is deliberately Punted:
-    Vere's `%da` jet delegates the `@da` calendar math to a Hoon arm via
-    `u3j_cook`, and nockvm has no `cook` (only `kick` at a known axis), so
-    matching it would mean hand-porting the calendar — disproportionate risk for
-    a userspace date parser, and the Punt runs the exact Hoon. Round-trip tested.
+    `%tas %ud %ux %uv %uw`; `slaw` does `%ud %tas %p %da` — Vere's full jetted
+    set. `%p` composes the new `+po`/`+ob` jets to parse ship names; `%da` ports
+    the `@da` calendar (`+year`/`+yawn`/`+yule`) directly, since nockvm has no
+    `cook` to slam Vere's Hoon helper (anchored in tests on the epoch
+    `~292277024401-.1.1` = `@da 0`). Round-trip / known-value tested.
   - Registration paths follow the chapter nesting (`one two tri qua ...`): `ob`
     under `tri`, `po`/`scot`/`slaw` under `qua`, the rest direct `two` arms.
   20 new tests (70 jet tests total) pass; full boot-pill reaches `use[0]`.

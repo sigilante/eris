@@ -123,13 +123,13 @@ is **never patched**. All pinned to Hoon **k138** (`K_138`), the pill's kelvin.
   two tri qua po <arm>]`.
 - **`text.rs` — `scot`/`slaw`** (render/parse `dime`s): like Vere, jet only the
   common auras and `Punt` the rest (partial coverage is always correct). `scot`:
-  `%tas %ud %ux %uv %uw`; `slaw`: `%ud %tas %p` (`%p` composes the `+po`/`+ob`
-  jets to parse ship names, per Vere's `_parse_p`). `slaw %da` is Punted on
-  purpose: Vere's jet delegates the `@da` calendar math to a Hoon arm via
-  `u3j_cook`, and nockvm exposes no `cook` (only `kick`), so we leave `%da` to
-  the Nock (correct, just unjetted). Ported from Vere `e/{scot,slaw}.c` (+ the
-  `u3s_etch_*`/`u3s_sift_*` in `serial.c`). Chapter `qua`: path `[k138 one two
-  tri qua <arm>]`.
+  `%tas %ud %ux %uv %uw`; `slaw`: `%ud %tas %p %da` — Vere's full jetted set.
+  `%p` composes the `+po`/`+ob` jets to parse ship names (per Vere's
+  `_parse_p`); `%da` ports the `@da` calendar (`+year`/`+yawn`/`+yule`/`+yo`/
+  `+yelp`) directly in Rust, because nockvm exposes no `cook` to slam Vere's
+  Hoon date helper (it has only `kick` at a known axis). Ported from Vere
+  `e/{scot,slaw}.c` (+ the `u3s_etch_*`/`u3s_sift_*` in `serial.c`). Chapter
+  `qua`: path `[k138 one two tri qua <arm>]`.
   All registered WITHOUT patching nockvm. Differential/round-trip tests vs. Rust
   oracles + the real boot-pill. *Per the profiling (see `docs/architecture.md`),
   these are coverage/correctness (esp. `@p`/number/path formatting), not a

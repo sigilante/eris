@@ -328,10 +328,184 @@ fn parse_p(stack: &mut NockStack, bytes: &[u8]) -> Result {
     finish_p(stack, &syls, false) // comet (no descramble)
 }
 
-/// `+slaw`: parse `[mod txt]` → `(unit @)`. Jets `%ud %tas %p`, Punts the rest
-/// (including `%da`, whose `@da` calendar math Vere delegates to a Hoon arm via
-/// `u3j_cook` — nockvm has no `cook`, and reimplementing the calendar here is
-/// disproportionate risk for a userspace parser, so `%da` runs correct-but-Nock).
+// --- `slaw %da`: parse an absolute `@da` date -------------------------------
+//
+// Vere parses the string in C then slams the Hoon `+year` arm (via `u3j_cook`)
+// for the `@da` math; nockvm has no `cook`, so we port `+year`/`+yawn`/`+yule`
+// (and `+yo`/`+yelp`) directly. `@da` = `(sec << 64) | frac`, where `sec` is
+// seconds since the Urbit epoch and `frac` is the MSB-aligned sub-second.
+
+const EPOCH: u128 = 292_277_024_400;
+const MOH: [u128; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const MOY: [u128; 12] = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/// `+yelp`: is `yer` a leap year?
+fn yelp(yer: u128) -> bool {
+    yer.is_multiple_of(4) && (!yer.is_multiple_of(100) || yer.is_multiple_of(400))
+}
+
+/// `+yawn`: absolute day number for `[yer mot day]` (1-indexed month/day).
+fn yawn(mut yer: u128, mot: u128, day_in: u128) -> u128 {
+    let mut day = day_in - 1;
+    let cah = if yelp(yer) { MOY } else { MOH };
+    for &len in cah.iter().take((mot - 1) as usize) {
+        day += len;
+    }
+    loop {
+        if !yer.is_multiple_of(4) {
+            let ney = yer - 1;
+            day += if yelp(ney) { 366 } else { 365 };
+            yer = ney;
+        } else if !yer.is_multiple_of(100) {
+            let nef = yer - 4;
+            day += if yelp(nef) { 1_461 } else { 1_460 };
+            yer = nef;
+        } else if !yer.is_multiple_of(400) {
+            let nec = yer - 100;
+            day += if yelp(nec) { 36_525 } else { 36_524 };
+            yer = nec;
+        } else {
+            return day + (yer / 400) * 146_097;
+        }
+    }
+}
+
+/// `+year`: `[ad year month day h m s frac]` → `@da`. `None` if out of range.
+#[allow(clippy::too_many_arguments)]
+fn year_to_da(
+    ad: bool,
+    year: u128,
+    month: u128,
+    day: u128,
+    h: u128,
+    m: u128,
+    s: u128,
+    frac: &[u128],
+) -> Option<u128> {
+    if !(1..=12).contains(&month) || day < 1 || frac.len() > 4 {
+        return None;
+    }
+    let yer = if ad {
+        EPOCH + year
+    } else {
+        EPOCH.checked_sub(year.checked_sub(1)?)?
+    };
+    let sec = yawn(yer, month, day) * 86_400 + h * 3_600 + m * 60 + s;
+    let mut fac: u128 = 0;
+    for (i, &w) in frac.iter().enumerate() {
+        fac |= w << ((3 - i) * 16);
+    }
+    Some((sec << 64) | fac)
+}
+
+fn parse_num(bytes: &[u8], cur: &mut usize, allow_zero_lead: bool) -> Option<u128> {
+    let d0 = *bytes.get(*cur)?;
+    if !d0.is_ascii_digit() || (!allow_zero_lead && d0 == b'0') {
+        return None;
+    }
+    let mut v = (d0 - b'0') as u128;
+    *cur += 1;
+    while let Some(&d) = bytes.get(*cur) {
+        if !d.is_ascii_digit() {
+            break;
+        }
+        v = v * 10 + (d - b'0') as u128;
+        *cur += 1;
+    }
+    Some(v)
+}
+
+fn parse_month(bytes: &[u8], cur: &mut usize) -> Option<u128> {
+    let d0 = *bytes.get(*cur)?;
+    if d0 == b'1' {
+        if let Some(&d1) = bytes.get(*cur + 1) {
+            if (b'0'..=b'2').contains(&d1) {
+                *cur += 2;
+                return Some(10 + (d1 - b'0') as u128);
+            }
+        }
+        *cur += 1;
+        Some(1)
+    } else if (b'2'..=b'9').contains(&d0) {
+        *cur += 1;
+        Some((d0 - b'0') as u128)
+    } else {
+        None
+    }
+}
+
+fn hex_digit(b: Option<&u8>) -> Option<u128> {
+    match b {
+        Some(&c) if c.is_ascii_digit() => Some((c - b'0') as u128),
+        Some(&c) if (b'a'..=b'f').contains(&c) => Some((10 + c - b'a') as u128),
+        _ => None,
+    }
+}
+
+/// `+slaw %da`: parse `~292277024401-.1.1` / `...~2000.1.1` / with optional
+/// `..hh.mm.ss` time and `..ffff.ffff` sub-second. Any structural failure Punts
+/// (`u3_none`); on success returns `[~ @da]`. Ported from Vere's `_parse_da`.
+fn parse_da(stack: &mut NockStack, bytes: &[u8]) -> Result {
+    if bytes.first() != Some(&b'~') {
+        return Err(JetErr::Punt);
+    }
+    let mut cur = 1usize; // past '~'
+    macro_rules! dot {
+        () => {{
+            if bytes.get(cur) != Some(&b'.') {
+                return Err(JetErr::Punt);
+            }
+            cur += 1;
+        }};
+    }
+
+    let year = parse_num(bytes, &mut cur, false).ok_or(JetErr::Punt)?;
+    let ad = if bytes.get(cur) == Some(&b'-') {
+        cur += 1;
+        false
+    } else {
+        true
+    };
+    dot!();
+    let month = parse_month(bytes, &mut cur).ok_or(JetErr::Punt)?;
+    dot!();
+    let day = parse_num(bytes, &mut cur, false).ok_or(JetErr::Punt)?;
+
+    let (mut h, mut m, mut s) = (0u128, 0u128, 0u128);
+    let mut frac: Vec<u128> = Vec::new();
+    if cur < bytes.len() {
+        dot!();
+        dot!(); // `..`
+        h = parse_num(bytes, &mut cur, true).ok_or(JetErr::Punt)?;
+        dot!();
+        m = parse_num(bytes, &mut cur, true).ok_or(JetErr::Punt)?;
+        dot!();
+        s = parse_num(bytes, &mut cur, true).ok_or(JetErr::Punt)?;
+        if cur < bytes.len() {
+            dot!();
+            dot!(); // `..`
+            loop {
+                let mut w: u128 = 0;
+                for _ in 0..4 {
+                    w = w * 16 + hex_digit(bytes.get(cur)).ok_or(JetErr::Punt)?;
+                    cur += 1;
+                }
+                frac.push(w);
+                if cur >= bytes.len() {
+                    break;
+                }
+                dot!();
+            }
+        }
+    }
+
+    let da = year_to_da(ad, year, month, day, h, m, s, &frac).ok_or(JetErr::Punt)?;
+    let val = Atom::from_bytes(stack, &da.to_le_bytes()).as_noun();
+    Ok(T(stack, &[D(0), val]))
+}
+
+/// `+slaw`: parse `[mod txt]` → `(unit @)`. Jets `%ud %tas %p %da`; Punts any
+/// other aura (runs correct-but-unjetted).
 pub fn jet_slaw(context: &mut Context, subject: Noun) -> Result {
     let space = context.stack.noun_space();
     let sam = slot(subject, 6, &space)?;
@@ -357,6 +531,7 @@ pub fn jet_slaw(context: &mut Context, subject: Noun) -> Result {
             }
         }
         b"p" => parse_p(&mut context.stack, &bytes),
+        b"da" => parse_da(&mut context.stack, &bytes),
         _ => Err(JetErr::Punt),
     }
 }
@@ -449,6 +624,29 @@ mod tests {
         let txt = cord_n(&mut c.stack, b"~xyzxyz");
         let sam = T(&mut c.stack, &[moda, txt]);
         assert_jet(c, jet_slaw, sam, D(0));
+    }
+
+    #[test]
+    fn test_slaw_da() {
+        let c = &mut init_context();
+        let atom128 = |stack: &mut NockStack, v: u128| Atom::from_bytes(stack, &v.to_le_bytes()).as_noun();
+        let check = |c: &mut Context, s: &[u8], da: u128| {
+            let moda = cord_n(&mut c.stack, b"da");
+            let txt = cord_n(&mut c.stack, s);
+            let sam = T(&mut c.stack, &[moda, txt]);
+            let val = atom128(&mut c.stack, da);
+            let want = T(&mut c.stack, &[D(0), val]);
+            assert_jet(c, jet_slaw, sam, want);
+        };
+        // The Urbit epoch ~292277024401-.1.1 (BC) is @da 0.
+        check(c, b"~292277024401-.1.1", 0);
+        // one second later
+        check(c, b"~292277024401-.1.1..00.00.01", 1u128 << 64);
+        // sub-second: one 16-bit group is MSB-aligned at bit 48
+        check(c, b"~292277024401-.1.1..00.00.00..8000", 0x8000u128 << 48);
+        // a day later -> 86400 seconds
+        check(c, b"~292277024401-.1.2", 86_400u128 << 64);
+        // bad shape (missing day) Punts -> falls back to Nock (not asserted here)
     }
 
     #[test]
