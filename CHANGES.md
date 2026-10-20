@@ -19,6 +19,62 @@ Entry format:
 
 ---
 
+## 2026-10-20 — Serf jets: fix `+by`/`+in` `wyt` subject axis (trap, not gate)
+- **Scope:** serf
+- **Upstream touched:** (none — Eris-owned, `serf/src/jets/{map,set}.rs`)
+- **Mechanism:** bugfix to the jets added 2026-10-20 (`+by`/`+in` doors)
+- **What:** `jet_by_wyt`/`jet_in_wyt` read the map/set `a` via `door_map`/
+  `door_set` (axis 7->6 = `u3x_con_sam`, axis 30) like every other arm. But
+  `+wyt` is a bare trap (`=<  $  ~%  %wyt  +  ~  |.`), not a sample-bearing gate:
+  Vere registers it at **parent-axis 3** (every other `by`/`in` arm is axis 7),
+  and reads `a` at `u3x_con_2` (**axis 14**). Our jets walked axis 30 — a wrong
+  subtree — producing a bad count. Fixed both to read axis 14. The unit tests
+  passed before because they drove the counting helpers directly and the
+  door-shaped `assert_jet_door` subject; added end-to-end tests that build the
+  real trap-shaped subject (`a` at axis 14) and call the jet entrypoint (these
+  fail against the old axis).
+- **Why:** Latent since the `+by`/`+in` commit (9767d4e). Surfaced by the
+  full boot-pill validation of the list/bit jets below: the `%boot` poke calls
+  `~(wyt by ...)`, so the bad count crashed boot with `Deterministic(Exit)`
+  right after `wack`. (Isolated by bisection: stock-only booted; the crash
+  tracked to `jet_by_wyt`; Vere's `tree.c` axis column and `d/in_wyt.c`'s
+  `u3x_con_2` confirmed the correct axis.)
+- **Re-apply risk:** none. If other trap arms are added later, check Vere's
+  `tree.c` parent-axis column — axis 3 means `u3x_con_2` (14), axis 7 means
+  `u3x_con_sam` (30).
+
+## 2026-10-20 — Serf jets: chapter-`two` `+list` + atom/bit helpers
+- **Scope:** serf
+- **Upstream touched:** (none — Eris-owned, `serf/src/jets/{list,bits}.rs`)
+- **Mechanism:** new code, registered via `LIST_JETS` in `jets::eris_hot_state()`
+- **What:** Added 12 unjetted chapter-`two` standard-library arms a stock k138
+  pill leans on but nockvm's dashboard omits. `list.rs`: `welp slag need reel
+  skim skip skid murn lien sort` (the gate-slamming ones apply the sample gate
+  via `jets::util::slam`, exactly as Vere's `u3j_gate_slam`; `sort` is the
+  first-pivot quicksort from Vere's `b/sort.c`). `bits.rs`: `swp` (= `(rep a
+  (flop (rip a b)))`, reusing nockvm's public `bits::util::rip`/`bits::rep` so
+  the bit-slicing is byte-identical to the stock jets) and `pow` (via ibig's
+  `UBig::pow_stack`, loom-allocated). All plain gates at `[k138 one two <arm>]`,
+  axis 1 — siblings of nockvm's own `flop`/`turn`/`roll`. 10 new tests (37 jet
+  tests total) pass. The boot-pill validation of these jets is what surfaced the
+  separate latent `wyt` axis bug (entry above); with that fixed the full boot
+  reaches the `use[0]` compile with all 47 eris jets (by21+in14+list12)
+  registered. The list/bit jets caused no regression themselves (stock-only and
+  BY+IN-only boots crashed identically until `wyt` was fixed). **Deferred within
+  this bucket:** none — the remaining gap-bucket items (`aor mat muk sqt`, plus
+  the crypto/`@r`/`ut`/`ob` buckets) are tracked separately.
+- **Why:** These are the cheapest, highest-confidence gap closures vs. Vere
+  (pure treap/list walks + `slam`; no new deps — `pow`'s `UBig` type is used by
+  inference, never named, so `serf/Cargo.toml` is unchanged). Per the profiling,
+  they do not speed boot; they are coverage/correctness for map/set/list-heavy
+  steady-state Hoon. Models the Vere-port method for the rest of the long tail.
+  (@r floats, the next bucket, have a Rust-jet reference in `../numerics`
+  branch `sigilante/nockapp-float-jets` — SoftFloat `hoon-float-jets`.)
+- **Re-apply risk:** none (additive, Eris-owned). On a nockchain pin bump,
+  re-check that `jets::bits::{rep, util::rip}`, `jets::util::slam`,
+  `Noun::as_atom`, and `Atom::{as_ubig, from_ubig}`/`UBig::pow_stack` stay
+  public, and the same kelvin/path caveats as the `+by` entry.
+
 ## 2026-10-20 — Serf jets: complete the `+by`/`+in` tails (Vere-k138 parity)
 - **Scope:** serf
 - **Upstream touched:** (none — Eris-owned, `serf/src/jets/{map,set}.rs`)

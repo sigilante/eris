@@ -94,6 +94,25 @@ is **never patched**. All pinned to Hoon **k138** (`K_138`), the pill's kelvin.
   `jet_put`/`jet_has` but they're commented out of the dashboard, cover only two
   arms, and dedup with `raw_equals` — the bug this avoids.) Differential tests
   vs. a `BTreeSet` oracle + treap invariants.
+  *Axis note:* `+by`/`+in` arms read the map/set `a` at `u3x_con_sam` (axis 30,
+  via `door_map`/`door_set`), EXCEPT `wyt`, a bare trap registered at parent-axis
+  3 whose `a` is at `u3x_con_2` (axis 14). Getting this wrong is silent: it only
+  bites when the arm actually fires on real data (it crashed a boot). See
+  `CHANGES.md` 2026-10-20 (`wyt` fix).
+- **`list.rs` — chapter-`two` `+list` helpers** (`welp slag need reel skim skip
+  skid murn lien sort`) and **`bits.rs` — atom/bit helpers** (`swp pow`). These
+  are standard-library arms a stock k138 pill uses that nockvm's dashboard omits
+  (Nockchain's kernels don't need them). *Where they come from:* ported from
+  Vere's C jets (`pkg/noun/jets/b/{sort,reel,skid,…}.c`, `c/{swp,pow}.c`) and
+  hoon.hoon, in nockvm's house style. The gate-slamming arms apply the sample
+  gate via `jets::util::slam` (= Vere's `u3j_gate_slam`); `sort` is Vere's
+  first-pivot quicksort. `swp` reuses nockvm's public `bits::util::rip`/`bits::rep`
+  so the bit-slicing is byte-identical to the stock jets; `pow` uses ibig's
+  `UBig::pow_stack` (loom-allocated, type used by inference so no new dep).
+  Registered via `LIST_JETS`; plain gates at `[k138 one two <arm>]`, axis 1.
+  Differential tests vs. Rust oracles + the real boot-pill. *Per the profiling
+  (see `docs/architecture.md`), these are coverage/correctness for map/set/list-
+  heavy steady-state, not a boot-speed lever.*
 
 ## Compatibility facts that make the graft sound (verified, keep current)
 

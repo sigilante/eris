@@ -12,14 +12,84 @@
 //! `+in` door entries — e.g. `[K_138, one, two, in, put]` — placing `+by` as a
 //! sibling of `+in` under the second core, at arm axis 1.
 //!
-//! Currently: the `+by` map door (see [`map`]) and the `+in` set door (see
-//! [`set`]).
+//! Currently: the `+by` map door (see [`map`]), the `+in` set door (see
+//! [`set`]), and the chapter-`two` `+list`/atom helpers (see [`list`],
+//! [`bits`]).
 
 use either::Either::Left;
 use nockvm::jets::hot::{HotEntry, K_138, URBIT_HOT_STATE};
 
+pub mod bits;
+pub mod list;
 pub mod map;
 pub mod set;
+
+/// Chapter-`two` `+list` helper gates (`welp slag need reel skim skip skid murn
+/// lien sort`) and atom/bit helpers (`swp pow`). Each is a plain gate, jetted at
+/// its own formula (axis 1), path `[k138 one two <arm>]` — siblings of nockvm's
+/// stock `flop`/`turn`/`roll` entries.
+pub static LIST_JETS: &[HotEntry] = &[
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"welp")],
+        1,
+        list::jet_welp,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"slag")],
+        1,
+        list::jet_slag,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"need")],
+        1,
+        list::jet_need,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"reel")],
+        1,
+        list::jet_reel,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"skim")],
+        1,
+        list::jet_skim,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"skip")],
+        1,
+        list::jet_skip,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"skid")],
+        1,
+        list::jet_skid,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"murn")],
+        1,
+        list::jet_murn,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"lien")],
+        1,
+        list::jet_lien,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"sort")],
+        1,
+        list::jet_sort,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"swp")],
+        1,
+        bits::jet_swp,
+    ),
+    (
+        &[K_138, Left(b"one"), Left(b"two"), Left(b"pow")],
+        1,
+        bits::jet_pow,
+    ),
+];
 
 /// The `+by` map-door arms. Paths are `[k138 one two by <arm>]`, each jetted at
 /// the arm's own formula (axis 1), matching the stock `+in` sibling entries.
@@ -214,5 +284,6 @@ pub fn eris_hot_state() -> Vec<HotEntry> {
     let mut entries = URBIT_HOT_STATE.to_vec();
     entries.extend_from_slice(BY_JETS);
     entries.extend_from_slice(IN_JETS);
+    entries.extend_from_slice(LIST_JETS);
     entries
 }
