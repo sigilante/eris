@@ -111,6 +111,26 @@ fn atom_u64(stack: &mut NockStack, v: u64) -> Noun {
     Atom::from_bytes(stack, &v.to_le_bytes()).as_noun()
 }
 
+/// `+fynd:ob` on a `u64` value (`slaw %p` descrambles planet/moon names). Same
+/// dispatch as the jet, computing `sor` (number of 16-bit shorts) from the
+/// value directly. Values above 64 bits (comets) never reach here.
+pub fn fynd_value(v: u64) -> u64 {
+    let sor = (64 - v.leading_zeros() as usize).div_ceil(16);
+    if !(2..=4).contains(&sor) {
+        return v;
+    }
+    if sor == 2 {
+        tail(v as u32) as u64
+    } else {
+        let lo = (v & 0xffff_ffff) as u32;
+        if (lo as u64) < B {
+            v
+        } else {
+            (v & 0xffff_ffff_0000_0000) | (tail(lo) as u64)
+        }
+    }
+}
+
 /// `~(fein ob a)`: scramble `pyn`.
 pub fn jet_fein(context: &mut Context, subject: Noun) -> Result {
     ob(context, subject, feis)

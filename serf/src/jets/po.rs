@@ -27,6 +27,20 @@ fn syllable(table: &[u8; 768], idx: usize) -> &[u8] {
     &table[idx * 3..idx * 3 + 3]
 }
 
+fn find(table: &[u8; 768], b: &[u8; 3]) -> Option<u64> {
+    (0..256).find(|&i| syllable(table, i) == b).map(|i| i as u64)
+}
+
+/// Index of a prefix syllable, if valid (`+end:po` reverse). Used by `slaw %p`.
+pub fn find_prefix(b: &[u8; 3]) -> Option<u64> {
+    find(PREFIX, b)
+}
+
+/// Index of a suffix syllable, if valid. Used by `slaw %p`.
+pub fn find_suffix(b: &[u8; 3]) -> Option<u64> {
+    find(SUFFIX, b)
+}
+
 /// index → syllable: the `idx`th syllable of `table` as a 3-byte `@tas` cord
 /// (first letter is the low byte). Out-of-range (`>= 256`) Punts to the Nock
 /// (which `+tod`/`+tos` crash on).
@@ -148,3 +162,4 @@ mod tests {
         assert_jet(c, jet_po_ins, bad, D(0));
     }
 }
+

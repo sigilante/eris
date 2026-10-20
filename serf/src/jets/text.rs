@@ -21,6 +21,8 @@ use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun, D, T};
 
+use super::{ob, po};
+
 // `u3s_dit_y`: 0-9, a-z, A-Z, '-', '~' (64 digits; hex uses [0,16), uv [0,32)).
 const DIT: &[u8; 64] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-~";
 
@@ -196,8 +198,140 @@ fn sift_tas(bytes: &[u8]) -> bool {
         .all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
 
-/// `+slaw`: parse `[mod txt]` → `(unit @)`. Jets `%ud`/`%tas`, Punts the rest
-/// (including `%da`/`%p`, which Vere jets via Hoon helpers).
+// --- `slaw %p`: parse a `@p` ship name ----------------------------------------
+
+/// Read a 3-lowercase-letter syllable at `*cur`, advancing on success.
+fn read_syl(bytes: &[u8], cur: &mut usize) -> Option<[u8; 3]> {
+    let c = *cur;
+    if c + 3 <= bytes.len()
+        && bytes[c].is_ascii_lowercase()
+        && bytes[c + 1].is_ascii_lowercase()
+        && bytes[c + 2].is_ascii_lowercase()
+    {
+        *cur += 3;
+        Some([bytes[c], bytes[c + 1], bytes[c + 2]])
+    } else {
+        None
+    }
+}
+
+/// Look up each syllable (galaxy = one suffix; otherwise prefix/suffix
+/// alternating), Horner-combine (first syllable most-significant), and for
+/// planets/moons (`do_fynd`) descramble via `+ob`. Returns `[~ value]`, or `~`
+/// if any syllable is not valid. Mirrors Vere's `combine`/`_parse_p` tail.
+fn finish_p(stack: &mut NockStack, syls: &[[u8; 3]], do_fynd: bool) -> Result {
+    let n = syls.len();
+    let mut value: u128 = 0;
+    for (i, s) in syls.iter().enumerate() {
+        let idx = if n == 1 {
+            po::find_suffix(s)
+        } else if i % 2 == 0 {
+            po::find_prefix(s)
+        } else {
+            po::find_suffix(s)
+        };
+        match idx {
+            Some(v) => value = value * 256 + v as u128,
+            None => return Ok(D(0)), // not a syllable -> ~
+        }
+    }
+    let out = if do_fynd {
+        ob::fynd_value(value as u64) as u128
+    } else {
+        value
+    };
+    let val = Atom::from_bytes(stack, &out.to_le_bytes()).as_noun();
+    Ok(T(stack, &[D(0), val]))
+}
+
+/// `+slaw %p`: parse `~zod` / `~marzod` / `~sampel-palnet` / moons / comets.
+/// Structural failure Punts (`u3_none`); a non-syllable yields `~`. Ported from
+/// Vere's `_parse_p`, reusing our `+po` and `+ob` jets.
+fn parse_p(stack: &mut NockStack, bytes: &[u8]) -> Result {
+    let n = bytes.len();
+    if bytes.first() != Some(&b'~') {
+        return Err(JetErr::Punt);
+    }
+    let mut cur = 1usize;
+    let mut syls: Vec<[u8; 3]> = Vec::new();
+
+    // `-` separator, or structural failure.
+    macro_rules! dash {
+        () => {{
+            if bytes.get(cur) != Some(&b'-') {
+                return Err(JetErr::Punt);
+            }
+            cur += 1;
+        }};
+    }
+    // read one syllable (Punt if absent)
+    macro_rules! syl {
+        () => {{
+            match read_syl(bytes, &mut cur) {
+                Some(s) => syls.push(s),
+                None => return Err(JetErr::Punt),
+            }
+        }};
+    }
+
+    syl!(); // a
+    if cur >= n {
+        return finish_p(stack, &syls, false); // galaxy
+    }
+    syl!(); // b
+    if cur >= n {
+        return finish_p(stack, &syls, false); // star
+    }
+    dash!();
+    syl!();
+    if cur >= n {
+        return Err(JetErr::Punt);
+    }
+    syl!(); // c d
+    if cur >= n {
+        return finish_p(stack, &syls, true); // planet
+    }
+    dash!();
+    syl!();
+    if cur >= n {
+        return Err(JetErr::Punt);
+    }
+    syl!(); // e f
+    if cur >= n {
+        return finish_p(stack, &syls, true); // short moon
+    }
+    dash!();
+    syl!();
+    if cur >= n {
+        return Err(JetErr::Punt);
+    }
+    syl!(); // g h
+    if cur >= n {
+        return finish_p(stack, &syls, true); // long moon
+    }
+    // comet: `--` then four more dash-separated pairs
+    dash!();
+    dash!();
+    for pair in 0..4 {
+        syl!();
+        if cur >= n {
+            return Err(JetErr::Punt);
+        }
+        syl!();
+        if pair < 3 {
+            dash!();
+        }
+    }
+    if cur < n {
+        return Err(JetErr::Punt); // trailing junk
+    }
+    finish_p(stack, &syls, false) // comet (no descramble)
+}
+
+/// `+slaw`: parse `[mod txt]` → `(unit @)`. Jets `%ud %tas %p`, Punts the rest
+/// (including `%da`, whose `@da` calendar math Vere delegates to a Hoon arm via
+/// `u3j_cook` — nockvm has no `cook`, and reimplementing the calendar here is
+/// disproportionate risk for a userspace parser, so `%da` runs correct-but-Nock).
 pub fn jet_slaw(context: &mut Context, subject: Noun) -> Result {
     let space = context.stack.noun_space();
     let sam = slot(subject, 6, &space)?;
@@ -222,6 +356,7 @@ pub fn jet_slaw(context: &mut Context, subject: Noun) -> Result {
                 Ok(D(0))
             }
         }
+        b"p" => parse_p(&mut context.stack, &bytes),
         _ => Err(JetErr::Punt),
     }
 }
@@ -286,6 +421,34 @@ mod tests {
             let want = T(&mut c.stack, &[D(0), D(v)]);
             assert_noun_eq(&mut c.stack, got, want);
         }
+    }
+
+    fn slaw_p(c: &mut Context, name: &[u8], want_val: Noun) {
+        let moda = cord_n(&mut c.stack, b"p");
+        let txt = cord_n(&mut c.stack, name);
+        let sam = T(&mut c.stack, &[moda, txt]);
+        let want = T(&mut c.stack, &[D(0), want_val]);
+        assert_jet(c, jet_slaw, sam, want);
+    }
+
+    #[test]
+    fn test_slaw_p() {
+        let c = &mut init_context();
+        // galaxies: suffix index
+        slaw_p(c, b"~zod", D(0));
+        slaw_p(c, b"~nec", D(1));
+        // star ~marzod = prefix(mar=1)*256 + suffix(zod=0) = 256
+        slaw_p(c, b"~marzod", D(256));
+        // planet ~marnec-dozzod: combine [mar nec doz zod] = 16_842_752,
+        // then descramble via +ob fynd.
+        let raw = ((1u64 * 256 + 1) * 256 + 0) * 256 + 0;
+        let want = D(ob::fynd_value(raw));
+        slaw_p(c, b"~marnec-dozzod", want);
+        // not a real syllable -> bare ~ (empty unit), not [~ 0]
+        let moda = cord_n(&mut c.stack, b"p");
+        let txt = cord_n(&mut c.stack, b"~xyzxyz");
+        let sam = T(&mut c.stack, &[moda, txt]);
+        assert_jet(c, jet_slaw, sam, D(0));
     }
 
     #[test]
