@@ -35,6 +35,8 @@ use nockvm::unifying_equality::unifying_equality;
 
 type JetResult<T> = std::result::Result<T, JetErr>;
 
+
+
 // ---------------------------------------------------------------------------
 // node plumbing
 //
@@ -540,9 +542,11 @@ fn map_any(context: &mut Context, tree: Noun, gate: Noun, space: &NounSpace) -> 
 // jets (the door arms)
 //
 // A door arm's subject is `[battery sample context]`: sample at axis 6, the door
-// core (whose own sample is the map `a`) at axis 7. `door_map` reads `a`. The
-// no-sample arms (`tap`/`key`/`wyt`/`apt`) ignore axis 6 and read `a` the same
-// way (it is the door core's own sample, at axis 7->6 = con-sam).
+// core (whose own sample is the map `a`) at axis 7. `door_map` reads `a` at
+// axis 7->6 (= `u3x_con_sam`, axis 30). The no-sample trap arms `tap`/`key`/`apt`
+// ignore axis 6 but still find `a` there. `wyt` is the one exception: it is a
+// bare `~%  %wyt  +  ~  |.` trap registered at parent-axis 3, so its `a` is one
+// axis shallower, at `u3x_con_2` (axis 14) — see `jet_by_wyt`.
 // ---------------------------------------------------------------------------
 
 /// `~(get by a)`: `(unit value)`.
@@ -674,7 +678,11 @@ pub fn jet_by_key(context: &mut Context, subject: Noun) -> Result {
 /// `~(wyt by a)`: the entry count.
 pub fn jet_by_wyt(context: &mut Context, subject: Noun) -> Result {
     let space = context.stack.noun_space();
-    let a = door_map(subject, &space)?;
+    // `+wyt:by` is a bare trap (`~%  %wyt  +  ~  |.`), so its door core sits one
+    // axis shallower than the sample-bearing arms: `a` is at `u3x_con_2` (axis
+    // 14), NOT `u3x_con_sam` (axis 30 = `door_map`). Vere registers `wyt` at
+    // parent-axis 3 for exactly this reason; every other `+by` arm is axis 7.
+    let a = slot(subject, 14, &space)?;
     Ok(D(map_wyt(a, &space)?))
 }
 
@@ -1099,6 +1107,13 @@ mod tests {
         let map = from_model(&mut context.stack, &space, &model);
 
         assert_eq!(map_wyt(map, &space).unwrap(), model.len() as u64);
+
+        // End-to-end through the jet entrypoint: `+wyt` is a bare trap, so `a`
+        // lives at axis 14 (u3x_con_2), not `door_map` (axis 30). Build the
+        // trap-shaped subject [* * a *] (axis 14 = a) and check the count.
+        let subj = T(&mut context.stack, &[D(0), D(0), map, D(0)]);
+        let got_wyt = jet_by_wyt(context, subj).unwrap();
+        assert_eq!(direct(got_wyt), model.len() as u64);
 
         // key set: collect its bare elements, compare to the model's keys.
         let keys = map_key(&mut context.stack, map, D(0), &space).unwrap();

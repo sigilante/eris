@@ -31,6 +31,8 @@ use nockvm::unifying_equality::unifying_equality;
 
 type JetResult<T> = std::result::Result<T, JetErr>;
 
+
+
 // ---------------------------------------------------------------------------
 // node plumbing: a node is `[n l r]`; n=2, l=6, r=7.
 // ---------------------------------------------------------------------------
@@ -441,7 +443,9 @@ fn set_any(context: &mut Context, tree: Noun, gate: Noun, space: &NounSpace) -> 
 
 // ---------------------------------------------------------------------------
 // jets (the door arms); sample at axis 6, door core (whose sample is the set) at 7.
-// The no-sample arms (`tap`/`wyt`/`apt`) ignore axis 6 and read `a` via `door_set`.
+// The no-sample trap arms `tap`/`apt` read `a` via `door_set` (axis 7->6 = 30).
+// `wyt` is the exception: a bare `~% %wyt + ~ |.` trap at parent-axis 3, so its
+// `a` is at `u3x_con_2` (axis 14) — see `jet_in_wyt`.
 // ---------------------------------------------------------------------------
 
 /// `~(has in a)`: `%.y` iff the element is present.
@@ -514,7 +518,10 @@ pub fn jet_in_tap(context: &mut Context, subject: Noun) -> Result {
 /// `~(wyt in a)`: the element count.
 pub fn jet_in_wyt(context: &mut Context, subject: Noun) -> Result {
     let space = context.stack.noun_space();
-    let a = door_set(subject, &space)?;
+    // `+wyt:in` is a bare trap (`~%  %wyt  +  ~  |.`): `a` is at `u3x_con_2`
+    // (axis 14), NOT `u3x_con_sam` (axis 30 = `door_set`). Vere registers `wyt`
+    // at parent-axis 3; every other `+in` arm is axis 7. See map.rs `jet_by_wyt`.
+    let a = slot(subject, 14, &space)?;
     Ok(D(set_wyt(a, &space)?))
 }
 
@@ -795,8 +802,13 @@ mod tests {
             }
             let set = from_model(&mut context.stack, &space, &model);
 
-            // wyt
+            // wyt (helper)
             assert_eq!(set_wyt(set, &space).unwrap(), model.len() as u64);
+            // wyt end-to-end: `+wyt:in` is a bare trap, so `a` is at axis 14
+            // (u3x_con_2), not `door_set` (axis 30). Build [* * a *] and check.
+            let subj = T(&mut context.stack, &[D(0), D(0), set, D(0)]);
+            let got_wyt = jet_in_wyt(context, subj).unwrap();
+            assert_eq!(direct(got_wyt), model.len() as u64);
             // apt
             assert!(set_apt(&mut context.stack, set, None, None, &space).unwrap());
             // tap == reverse-in-order, and holds exactly the model.
