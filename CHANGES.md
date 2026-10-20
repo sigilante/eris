@@ -19,6 +19,32 @@ Entry format:
 
 ---
 
+## 2026-10-20 — Serf jets: the `@r` float doors (`+rs`/`+rd`/`+rh`/`+rq`)
+- **Scope:** serf
+- **Upstream touched:** (none — Eris-owned, `serf/src/jets/flot.rs`)
+- **Mechanism:** new module `flot` (the `hoon-float-jets` reference, verbatim),
+  registered via `flot::HOON_FLOAT_HOT` in `jets::eris_hot_state()`. New dep
+  `sdfloat` (pure-Rust IEEE-754 SoftFloat), rev-pinned to the numerics reference.
+- **What:** Jet the four IEEE-754 float doors — `+rh` (f16), `+rs` (f32), `+rd`
+  (f64), `+rq` (f128) — ten arms each (`add sub mul div sqt lth lte equ gte
+  gth`), 40 jets total, at `[k138 one two tri <door> <arm>]`. The rounding mode
+  is read from the door's sample at axis 30 (`%n %u %d %z %a`); operands are the
+  low `width` bits of the atom, results correctly-rounded via `sdfloat`. `+fma`
+  is hinted in Hoon but has no SoftFloat FMA, so it stays Nock. *Source:* a
+  verbatim import of the numerics repo's `hoon-float-jets` crate (branch
+  `sigilante/nockapp-float-jets`), whose results are bit-identical to Vere's
+  Berkeley-SoftFloat C jets (the numerics project's own Hoon-vector tests prove
+  it). 4 new tests (known f16/f32/f64/f128 values) pass; full boot exits 0.
+- **Why:** The `@r` gap bucket — the cheapest remaining because the port already
+  exists and is validated upstream. Userspace math (Arvo core uses no floats, so
+  no boot impact). Per the reference, one known divergence: `+fl` overflow-to-inf
+  vs. SoftFloat saturation in some modes (urbit/urbit#7426) — pre-existing, not
+  ours.
+- **Re-apply risk:** none (additive). On a bump re-check `sdfloat`'s
+  `Format`/`SoftFloat`/`Round` API and that the `@r` doors keep their `~/` hints
+  at the k138 path. The `sdfloat` git rev is pinned; if it moves, re-verify
+  bit-exactness. Same kelvin caveats as the `+by` entry.
+
 ## 2026-10-20 — Serf jets: gap buckets 1–3 (`+po`, `+ob`, `scot`/`slaw`, atom helpers)
 - **Scope:** serf
 - **Upstream touched:** (none — Eris-owned, `serf/src/jets/{bits,list,ob,po,text}.rs`)

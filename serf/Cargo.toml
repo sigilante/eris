@@ -25,3 +25,6 @@ either = "1.9.0"
 # bit math for `+mat`/`+rub`. murmur3: the hash behind `+muk` (== nockvm's mug).
 ibig = { path = "../third_party/nockchain/crates/nockvm/rust/ibig" }
 murmur3 = { path = "../third_party/nockchain/crates/nockvm/rust/murmur3" }
+# Pure-Rust IEEE-754 SoftFloat for the `@r` float-door jets (`+rs`/`+rd`/`+rh`/
+# `+rq`); rev-pinned to match the numerics `hoon-float-jets` reference.
+sdfloat = { git = "https://github.com/sigilante/RustFloat.git", rev = "f7d449c" }

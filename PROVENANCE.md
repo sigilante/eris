@@ -130,11 +130,20 @@ is **never patched**. All pinned to Hoon **k138** (`K_138`), the pill's kelvin.
   Hoon date helper (it has only `kick` at a known axis). Ported from Vere
   `e/{scot,slaw}.c` (+ the `u3s_etch_*`/`u3s_sift_*` in `serial.c`). Chapter
   `qua`: path `[k138 one two tri qua <arm>]`.
+- **`flot.rs` — the `@r` IEEE-754 float doors** (`+rh`/`+rs`/`+rd`/`+rq`, ten
+  arms each: `add sub mul div sqt lth lte equ gte gth`; `fma` stays Nock). A
+  **verbatim import** of the numerics repo's `hoon-float-jets` crate (branch
+  `sigilante/nockapp-float-jets`), bit-identical to Vere's Berkeley-SoftFloat C
+  jets (proven by that project's Hoon-vector tests). It pulls the external
+  **`sdfloat`** crate (`github.com/sigilante/RustFloat`, rev `f7d449c`, pure-Rust
+  SoftFloat) — the one Eris dependency fetched from outside the vendored
+  submodules, rev-pinned in `serf/Cargo.toml`. Rounding mode at axis 30; chapter
+  `tri`, path `[k138 one two tri <door> <arm>]`.
   All registered WITHOUT patching nockvm. Differential/round-trip tests vs. Rust
   oracles + the real boot-pill. *Per the profiling (see `docs/architecture.md`),
-  these are coverage/correctness (esp. `@p`/number/path formatting), not a
-  boot-speed lever.* Deferred gap buckets: `@r` floats (a SoftFloat Rust-jet
-  reference exists in the `numerics` repo), crypto, and the `ut` type helpers.
+  these are coverage/correctness (esp. `@p`/number/path formatting and
+  userspace float math), not a boot-speed lever.* Deferred gap bucket: crypto
+  (and `scot`/`slaw`'s minor auras). The `ut` type helpers are the next target.
 
 ## Compatibility facts that make the graft sound (verified, keep current)
 

@@ -251,6 +251,7 @@ dependencies = [
  "ibig",
  "murmur3",
  "nockvm",
+ "sdfloat",
 ]
 
 [[package]]
@@ -509,6 +510,11 @@ checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
 ]
+
+[[package]]
+name = "sdfloat"
+version = "0.1.0"
+source = "git+https://github.com/sigilante/RustFloat.git?rev=f7d449c#f7d449ca7f6e6ddbdf438a2a89cfd37bfc907f30"
 
 [[package]]
 name = "semver"

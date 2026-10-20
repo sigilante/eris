@@ -20,6 +20,7 @@ use either::Either::Left;
 use nockvm::jets::hot::{HotEntry, K_138, URBIT_HOT_STATE};
 
 pub mod bits;
+pub mod flot;
 pub mod list;
 pub mod map;
 pub mod ob;
@@ -385,5 +386,6 @@ pub fn eris_hot_state() -> Vec<HotEntry> {
     entries.extend_from_slice(OB_JETS);
     entries.extend_from_slice(PO_JETS);
     entries.extend_from_slice(TEXT_JETS);
+    entries.extend_from_slice(flot::HOON_FLOAT_HOT);
     entries
 }
