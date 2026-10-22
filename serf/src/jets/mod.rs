@@ -12,9 +12,21 @@
 //! `+in` door entries — e.g. `[K_138, one, two, in, put]` — placing `+by` as a
 //! sibling of `+in` under the second core, at arm axis 1.
 //!
-//! Currently: the `+by` map door (see [`map`]), the `+in` set door (see
-//! [`set`]), and the chapter-`two` `+list`/atom helpers (see [`list`],
-//! [`bits`]).
+//! Currently registered (see [`eris_hot_state`] for the exact tables):
+//!   * the `+by` map door ([`map`]) and `+in` set door ([`set`]);
+//!   * chapter-`two` `+list` helpers ([`list`]) and atom/bit helpers ([`bits`]:
+//!     `swp pow aor mat muk rub`);
+//!   * `+ob` `@p` scramble ([`ob`]) and `+po` syllables ([`po`]);
+//!   * `+scot`/`+slaw` dime render/parse ([`text`]);
+//!   * the `@rs/@rd/@rh/@rq` SoftFloat operations ([`flot`]);
+//!   * the chapter-`pen` `+ut` type helpers ([`ut`]).
+//!
+//! Every jet is sound by construction: on anything outside the case it handles
+//! it returns [`nockvm::jets::JetErr::Punt`] and the raw Nock runs instead, so
+//! partial coverage is never a wrong answer. The helpers that recurse on tree
+//! or type depth (map/set treap ops, `+ut` `look`/`loot`) rely on the serf
+//! running on a large native stack (see `main::main`) rather than the default
+//! 8 MiB, so a deep (adversarially unbalanced) structure cannot overflow it.
 
 use either::Either::Left;
 use nockvm::jets::hot::{HotEntry, K_138, URBIT_HOT_STATE};

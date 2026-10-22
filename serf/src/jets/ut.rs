@@ -62,22 +62,40 @@ fn gor_lt(stack: &mut NockStack, a: Noun, b: Noun, space: &NounSpace) -> bool {
     unsafe { gor(stack, a, b, space).raw_equals(&D(0)) }
 }
 
-fn ubig(n: Noun, space: &NounSpace) -> JetResult<UBig> {
+// Every `UBig` here is built with the `_stack` constructors so its words live on
+// the NockStack arena and are freed with the event's frame; ibig's plain
+// operators leak a never-freed heap buffer per call (see bits.rs). `look`/`loot`
+// run on every compiler variable resolution, so that leak would be large.
+
+fn ubig(stack: &mut NockStack, n: Noun, space: &NounSpace) -> JetResult<UBig> {
     let a = n.as_atom().map_err(|_| JetErr::Punt)?;
-    Ok(UBig::from_le_bytes(a.in_space(space).as_ne_bytes()))
+    Ok(UBig::from_le_bytes_stack(stack, a.in_space(space).as_ne_bytes()))
 }
 fn from_ubig(stack: &mut NockStack, x: &UBig) -> Noun {
     Atom::from_ubig(stack, x).as_noun()
 }
 
 /// `+peg`: axis of `b` within axis `a` (`b >= 1`).
-fn peg(a: &UBig, b: &UBig) -> UBig {
-    let one = UBig::from(1u8);
-    if *b == one {
-        return a.clone();
+fn peg(stack: &mut NockStack, a: &UBig, b: &UBig) -> UBig {
+    // `b` must be a real axis (`>= 1`). `bit_len(b) <= 1` means `b` is 0 or 1:
+    // for `b == 1` the axis is unchanged (`a`), and for `b == 0` returning `a`
+    // avoids the `bit_len - 1` underflow that would otherwise shift by
+    // `usize::MAX`. Callers must not pass 0 (`comb` guards for it); this is the
+    // backstop (dwarf's `peg` underflow finding).
+    let bl = b.bit_len();
+    if bl <= 1 {
+        return a.clone_stack(stack);
     }
-    let d = b.bit_len() - 1;
-    (a << d) | (b & ((UBig::from(1u8) << d) - one))
+    let d = bl - 1;
+    // peg = (lsh [0 d] a) | (end [0 d] b). The top (d-th) bit of `b` is set, so
+    // its low `d` bits are `b - 2^d`; and `a << d` has zero low `d` bits, so the
+    // splice is a disjoint add.
+    let one = UBig::from_unsigned_stack(stack, 1u64);
+    let two_d = UBig::shl_stack(stack, one, d);
+    let b_owned = b.clone_stack(stack);
+    let lo = UBig::sub_stack(stack, b_owned, two_d);
+    let hi = UBig::shl_ref_stack(stack, a, d);
+    UBig::add_stack(stack, hi, lo)
 }
 
 // --- type constructors ------------------------------------------------------
@@ -211,9 +229,11 @@ pub fn jet_flor(context: &mut Context, subject: Noun) -> Result {
     Ok(T(&mut context.stack, &[D(6), bos, yes, nif]))
 }
 
-// --- fitz: kelvin compatibility ---------------------------------------------
+// --- fitz: aura compatibility -----------------------------------------------
 
-/// `+fitz:ut`: is version `wix` compatible with `yaz`? Vere `u3qf_fitz`.
+/// `+fitz:ut`: is aura `wix` a sub-aura of (compatible with) `yaz`? This is the
+/// aura-nesting test (e.g. `@tas` nests under `@ta`), NOT a Hoon-kelvin check.
+/// Vere `u3qf_fitz`.
 pub fn jet_fitz(context: &mut Context, subject: Noun) -> Result {
     let space = context.stack.noun_space();
     let sam = slot(subject, 6, &space)?;
@@ -307,17 +327,20 @@ pub fn jet_comb(context: &mut Context, subject: Noun) -> Result {
     };
 
     if let Some(p_mal) = mal_axis {
-        let pm = ubig(p_mal, &space)?;
+        let pm = ubig(&mut context.stack, p_mal, &space)?;
         // buz = [0 p_buz], p_buz != 0?
         if !buz.is_atom() && is(slot(buz, 2, &space)?, 0) {
             let p_buz = slot(buz, 3, &space)?;
             if !is_nul(p_buz) {
-                let r = peg(&pm, &ubig(p_buz, &space)?);
+                let pb = ubig(&mut context.stack, p_buz, &space)?;
+                let r = peg(&mut context.stack, &pm, &pb);
                 let ax = from_ubig(&mut context.stack, &r);
                 return Ok(T(&mut context.stack, &[D(0), ax]));
             }
         }
-        // buz = [2 [0 pp] [0 pq]] ?
+        // buz = [2 [0 pp] [0 pq]] ? Both inner axes must be real (`!= 0`): a
+        // `[0 0]` is not a valid `[0 axis]` formula, so `peg` must not see a 0
+        // (which would underflow) — fall through to the generic `[7 mal buz]`.
         if !buz.is_atom() && is(slot(buz, 2, &space)?, 2) {
             let p_buz = slot(buz, 6, &space)?;
             let q_buz = slot(buz, 7, &space)?;
@@ -325,11 +348,15 @@ pub fn jet_comb(context: &mut Context, subject: Noun) -> Result {
                 && is(slot(p_buz, 2, &space)?, 0)
                 && !q_buz.is_atom()
                 && is(slot(q_buz, 2, &space)?, 0)
+                && !is_nul(slot(p_buz, 3, &space)?)
+                && !is_nul(slot(q_buz, 3, &space)?)
             {
-                let pp = ubig(slot(p_buz, 3, &space)?, &space)?;
-                let pq = ubig(slot(q_buz, 3, &space)?, &space)?;
-                let a1 = from_ubig(&mut context.stack, &peg(&pm, &pp));
-                let a2 = from_ubig(&mut context.stack, &peg(&pm, &pq));
+                let pp = ubig(&mut context.stack, slot(p_buz, 3, &space)?, &space)?;
+                let pq = ubig(&mut context.stack, slot(q_buz, 3, &space)?, &space)?;
+                let r1 = peg(&mut context.stack, &pm, &pp);
+                let a1 = from_ubig(&mut context.stack, &r1);
+                let r2 = peg(&mut context.stack, &pm, &pq);
+                let a2 = from_ubig(&mut context.stack, &r2);
                 let e1 = T(&mut context.stack, &[D(0), a1]);
                 let e2 = T(&mut context.stack, &[D(0), a2]);
                 return Ok(T(&mut context.stack, &[D(2), e1, e2]));
@@ -384,7 +411,11 @@ fn look_in(
     let hit = !qn.is_atom() && noun_eq(&mut context.stack, cog, pn);
     let (l_nul, r_nul) = (is_nul(l), is_nul(r));
 
-    let two = UBig::from(2u8);
+    // `axe * 2` / `* 3` / `* 6` / `* 7` via `peg`, each as a NockStack UBig.
+    let peg_k = |context: &mut Context, k: u64| -> UBig {
+        let kb = UBig::from_unsigned_stack(&mut context.stack, k);
+        peg(&mut context.stack, axe, &kb)
+    };
     let found = |context: &mut Context, a: &UBig| -> Noun {
         let ax = from_ubig(&mut context.stack, a);
         T(&mut context.stack, &[D(0), ax, qn])
@@ -398,26 +429,33 @@ fn look_in(
         }
     } else if l_nul {
         if hit {
-            Ok(found(context, &peg(axe, &two)))
+            let p = peg_k(context, 2);
+            Ok(found(context, &p))
         } else if gor_lt(&mut context.stack, cog, pn, space) {
             Ok(D(0))
         } else {
-            look_in(context, cog, r, &peg(axe, &UBig::from(3u8)), space)
+            let p = peg_k(context, 3);
+            look_in(context, cog, r, &p, space)
         }
     } else if r_nul {
         if hit {
-            Ok(found(context, &peg(axe, &two)))
+            let p = peg_k(context, 2);
+            Ok(found(context, &p))
         } else if gor_lt(&mut context.stack, cog, pn, space) {
-            look_in(context, cog, l, &peg(axe, &UBig::from(3u8)), space)
+            let p = peg_k(context, 3);
+            look_in(context, cog, l, &p, space)
         } else {
             Ok(D(0))
         }
     } else if hit {
-        Ok(found(context, &peg(axe, &two)))
+        let p = peg_k(context, 2);
+        Ok(found(context, &p))
     } else if gor_lt(&mut context.stack, cog, pn, space) {
-        look_in(context, cog, l, &peg(axe, &UBig::from(6u8)), space)
+        let p = peg_k(context, 6);
+        look_in(context, cog, l, &p, space)
     } else {
-        look_in(context, cog, r, &peg(axe, &UBig::from(7u8)), space)
+        let p = peg_k(context, 7);
+        look_in(context, cog, r, &p, space)
     }
 }
 
@@ -427,11 +465,19 @@ pub fn jet_look(context: &mut Context, subject: Noun) -> Result {
     let sam = slot(subject, 6, &space)?;
     let cog = slot(sam, 2, &space)?;
     let dab = slot(sam, 3, &space)?;
-    look_in(context, cog, dab, &UBig::from(1u8), &space)
+    let one = UBig::from_unsigned_stack(&mut context.stack, 1u64);
+    look_in(context, cog, dab, &one, &space)
 }
 
 /// `_loot_in`: like `_look_in` but over a `dom` whose values are themselves
 /// looked up via `+look`. Vere `_loot_in`.
+///
+/// DEVIATION (intentional): hoon.hoon's `tome` is `[p=what q=(map term hoon)]`,
+/// and `+loot` looks up in `q.tome` — so we read the inner map at `slot(qn, 3)`.
+/// Vere's C `_loot_in` reads `u3t(n_dom)` directly, i.e. treats the node value
+/// as a bare map. Against a real k138 pill the Hoon definition is authoritative;
+/// a boot crash at `wack` confirmed the bare-map reading is wrong here. We match
+/// hoon, not Vere's C. See CHANGES.md / PROVENANCE.md.
 fn loot_in(
     context: &mut Context,
     cog: Noun,
@@ -450,46 +496,66 @@ fn loot_in(
     }
     let qn = slot(n, 3, space)?; // tome = [p=what q=(map term hoon)]
     let map = slot(qn, 3, space)?; // q.tome
-    let yep = look_in(context, cog, map, &UBig::from(1u8), space)?;
+    let one = UBig::from_unsigned_stack(&mut context.stack, 1u64);
+    let yep = look_in(context, cog, map, &one, space)?;
     let (l_nul, r_nul) = (is_nul(l), is_nul(r));
 
-    // On a hit: result axis = peg(peg(axe, nax), u.yep.head); value = u.yep.tail.
-    // `yep` is `[~ u_axe u_val]`; u_axe = slot(yep,6), u_val = slot(yep,7).
-    let on_hit = |context: &mut Context, base: &UBig| -> JetResult<Noun> {
-        let u_axe = ubig(slot(yep, 6, space)?, space)?;
-        let u_val = slot(yep, 7, space)?;
-        let ax = from_ubig(&mut context.stack, &peg(base, &u_axe));
-        Ok(T(&mut context.stack, &[D(0), ax, u_val]))
+    // `peg(axe, k)` as a NockStack UBig.
+    let peg_k = |context: &mut Context, k: u64| -> UBig {
+        let kb = UBig::from_unsigned_stack(&mut context.stack, k);
+        peg(&mut context.stack, axe, &kb)
     };
 
     if l_nul && r_nul {
         if is_nul(yep) {
             Ok(D(0))
         } else {
-            on_hit(context, axe)
+            loot_on_hit(context, yep, axe, space)
         }
     } else if l_nul {
         if is_nul(yep) {
-            loot_in(context, cog, r, &peg(axe, &UBig::from(3u8)), space)
+            let p = peg_k(context, 3);
+            loot_in(context, cog, r, &p, space)
         } else {
-            on_hit(context, &peg(axe, &UBig::from(2u8)))
+            let p = peg_k(context, 2);
+            loot_on_hit(context, yep, &p, space)
         }
     } else if r_nul {
         if is_nul(yep) {
-            loot_in(context, cog, l, &peg(axe, &UBig::from(3u8)), space)
+            let p = peg_k(context, 3);
+            loot_in(context, cog, l, &p, space)
         } else {
-            on_hit(context, &peg(axe, &UBig::from(2u8)))
+            let p = peg_k(context, 2);
+            loot_on_hit(context, yep, &p, space)
         }
     } else if is_nul(yep) {
-        let pey = loot_in(context, cog, l, &peg(axe, &UBig::from(6u8)), space)?;
+        let p6 = peg_k(context, 6);
+        let pey = loot_in(context, cog, l, &p6, space)?;
         if !is_nul(pey) {
             Ok(pey)
         } else {
-            loot_in(context, cog, r, &peg(axe, &UBig::from(7u8)), space)
+            let p7 = peg_k(context, 7);
+            loot_in(context, cog, r, &p7, space)
         }
     } else {
-        on_hit(context, &peg(axe, &UBig::from(2u8)))
+        let p = peg_k(context, 2);
+        loot_on_hit(context, yep, &p, space)
     }
+}
+
+/// On a `+loot` hit: result axis = `peg(base, u.yep.head)`, value = `u.yep.tail`.
+/// `yep` is `[~ u_axe u_val]`, so u_axe = `slot(yep,6)`, u_val = `slot(yep,7)`.
+fn loot_on_hit(
+    context: &mut Context,
+    yep: Noun,
+    base: &UBig,
+    space: &NounSpace,
+) -> JetResult<Noun> {
+    let u_axe = ubig(&mut context.stack, slot(yep, 6, space)?, space)?;
+    let u_val = slot(yep, 7, space)?;
+    let r = peg(&mut context.stack, base, &u_axe);
+    let ax = from_ubig(&mut context.stack, &r);
+    Ok(T(&mut context.stack, &[D(0), ax, u_val]))
 }
 
 /// `+loot:ut`: resolve `cog` through the arm map `dom`.
@@ -498,7 +564,8 @@ pub fn jet_loot(context: &mut Context, subject: Noun) -> Result {
     let sam = slot(subject, 6, &space)?;
     let cog = slot(sam, 2, &space)?;
     let dom = slot(sam, 3, &space)?;
-    loot_in(context, cog, dom, &UBig::from(1u8), &space)
+    let one = UBig::from_unsigned_stack(&mut context.stack, 1u64);
+    loot_in(context, cog, dom, &one, &space)
 }
 
 #[cfg(test)]
@@ -682,5 +749,22 @@ mod tests {
         let hv = T(&mut c.stack, &[D(1), D(9)]);
         let want = T(&mut c.stack, &[D(0), D(2), hv]);
         assert_noun_eq(&mut c.stack, got, want);
+    }
+
+    #[test]
+    fn test_comb_zero_axis_no_underflow() {
+        let c = &mut init_context();
+        // mal = [0 1]; buz = [2 [0 0] [0 0]]. The `[2 [0 pp][0 pq]]` fast path
+        // must be skipped (axis 0 is invalid), so `peg` never sees a 0 and never
+        // underflows (dwarf's peg finding). It falls through to [7 mal buz].
+        let mal = T(&mut c.stack, &[D(0), D(1)]);
+        let p0 = T(&mut c.stack, &[D(0), D(0)]);
+        let q0 = T(&mut c.stack, &[D(0), D(0)]);
+        let buz = T(&mut c.stack, &[D(2), p0, q0]);
+        let sam = T(&mut c.stack, &[mal, buz]);
+        let subj = T(&mut c.stack, &[D(0), sam, D(0)]);
+        let got = jet_comb(c, subj).unwrap();
+        let head = slot(got, 2, &c.stack.noun_space()).unwrap();
+        assert!(unsafe { head.raw_equals(&D(7)) }, "must be [7 mal buz]");
     }
 }

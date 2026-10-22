@@ -19,6 +19,40 @@ Entry format:
 
 ---
 
+## 2026-10-22 — Serf jets: audit hardening (memory safety + UBig leak)
+
+- **Scope:** serf
+- **Upstream touched:** (none — Eris-owned: `serf/src/jets/*.rs`, `serf/src/main.rs`)
+- **Mechanism:** overlay (serf/..)
+- **What:** Fixed the audit findings (angel/dwarf/chevalier) that live in
+  Eris-owned jets. (1) **Native stack overflow:** the serf now runs on a 1 GiB
+  worker thread (`main::main`), so the depth-recursive treap/type jets
+  (`+by`/`+in`, `look`/`loot`) can't overflow the default 8 MiB stack on an
+  adversarially unbalanced structure. (2) **`rub` allocation bomb:** `low_bits`
+  now truncates by bytes instead of materializing a `(1<<width)-1` mask, so a
+  sparse high bit no longer asks for gibibytes. (3) **`pow`/`swp` OOM:** cap
+  output bits (`pow`) and tighten the bloq guard to 20 (`swp`), Punting past
+  them. (4) **`peg` underflow / `comb`:** guard `b.bit_len() <= 1` in `peg` and
+  require non-zero axes in `comb`'s `[2 [0 pp][0 pq]]` fast path. (5) **`slaw
+  %da` overflow:** checked `u128` parse + a year bound + a `sec < 2^64` check, so
+  an out-of-range date Punts instead of silently wrapping to a wrong `@da`.
+  (6) **ill-typed lists:** the `+list` arms Punt on a non-`~` tail (hoon's `?~`
+  would crash there) rather than returning a value Nock never would. (7) **UBig
+  heap leak:** `bits.rs`/`text.rs`/`ut.rs` now use ibig's `_stack` ops
+  throughout, so bignum intermediates live on the NockStack arena (reclaimed per
+  event) instead of leaking a never-freed `ManuallyDrop<Vec>` on every call.
+- **Why:** these are DoS/soundness/leak bugs a hostile event could reach; all
+  are in Eris jets (the comparators `gor`/`mor`/`mug` the jets call are upstream
+  nockvm and are flagged separately, not patched). Every fix is Punt-safe: it
+  only ever falls back to the raw Nock, never changes a correct result.
+- **Re-apply risk:** none (additive, Eris-owned). The `_stack` UBig ops are from
+  the pinned ibig fork; on a nockchain bump re-check they still exist. 70 jet
+  unit tests pass (incl. 6 new regressions); full boot-pill still reaches
+  `fakezod booted (eve=6)`, ~4× faster (176s vs 672s use[0]) thanks to the leak
+  fix removing allocator churn in `look`/`loot`.
+
+---
+
 ## 2026-10-20 — Serf jets: the `+ut` type helpers (chapter `pen`)
 - **Scope:** serf
 - **Upstream touched:** (none — Eris-owned, `serf/src/jets/ut.rs`)
@@ -106,8 +140,10 @@ Entry format:
 - **Why:** These were the cheapest, highest-confidence gap closures (pure/table
   logic + `Punt`-safe partial coverage). Per the profiling they are coverage,
   not a boot-speed lever; load-bearing for `@p`/number/path formatting in
-  userspace. Deferred (per the gap analysis): `@r` floats, the crypto bucket,
-  the `ut` type helpers, and `scot`/`slaw`'s `%da`/`%p` (run unjetted, correct).
+  userspace. `slaw` here already covers Vere's full set including `%p`/`%da`
+  (see above). Deferred at the time of this entry (per the gap analysis): `@r`
+  floats, the crypto bucket, and the `ut` type helpers — the first and last
+  landed in later entries the same day; crypto remains deferred.
 - **Re-apply risk:** none (additive). On a nockchain bump re-check the ibig
   (`UBig::{from_le_bytes,to_le_bytes,pow_stack}`, `Atom::{as_ubig,from_ubig}`)
   and `murmur3::murmur3_32_of_slice` APIs, `bits::util::{met,bex,lsh,con}`, and

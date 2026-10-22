@@ -45,25 +45,50 @@ fn noun_eq(stack: &mut NockStack, a: Noun, b: Noun) -> bool {
     unsafe { unifying_equality(stack, &mut a as *mut Noun, &mut b as *mut Noun) }
 }
 
+// All `UBig` intermediates below are built with the `_stack` constructors so
+// their backing words live on the NockStack arena and are reclaimed when the
+// event's frame pops. ibig's plain operators (`<<`, `&`, `+`, …) allocate their
+// result `Buffer` on the *system* heap as a `ManuallyDrop<Vec>` that is never
+// freed (see `ibig/src/buffer.rs`), so using them here would leak a little heap
+// on every call — unbounded over a long-running serf. The arithmetic (and thus
+// the bit-exact result) is identical either way; only the allocation site moves.
+
 /// `b & ((1 << width) - 1)` — the low `width` bits (0 when `width` is 0).
-fn low_bits(x: &UBig, width: usize) -> UBig {
+///
+/// Computed by byte-truncation rather than by building a `(1<<width)-1` mask, so
+/// no giant mask is ever materialized. When `width` reaches or exceeds the bit
+/// length of `x` the low bits *are* all of `x`, so we return it unchanged — this
+/// is what stops `+rub` from allocating a multi-GiB mask to extract a value
+/// whose high bits are all zero (dwarf's `rub` allocation-bomb finding).
+fn low_bits(stack: &mut NockStack, x: &UBig, width: usize) -> UBig {
     if width == 0 {
-        return UBig::from(0u8);
+        return UBig::from_unsigned_stack(stack, 0u64);
     }
-    let mask = (UBig::from(1u8) << width) - UBig::from(1u8);
-    x & mask
+    if width >= x.bit_len() {
+        return x.clone_stack(stack);
+    }
+    let bytes = x.to_le_bytes_stack();
+    let full = width / 8;
+    let rem = width % 8;
+    let take = (full + usize::from(rem > 0)).min(bytes.len());
+    let mut buf = bytes[..take].to_vec();
+    if rem > 0 && full < buf.len() {
+        buf[full] &= (1u8 << rem) - 1;
+    }
+    UBig::from_le_bytes_stack(stack, &buf)
 }
 
 /// `cut [0 [off width]]`: `width` bits of `x` starting at bit `off`.
-fn cut_bits(x: &UBig, off: usize, width: usize) -> UBig {
-    low_bits(&(x >> off), width)
+fn cut_bits(stack: &mut NockStack, x: &UBig, off: usize, width: usize) -> UBig {
+    let shifted = UBig::shr_ref_stack(stack, x, off);
+    low_bits(stack, &shifted, width)
 }
 
 /// Trailing-zero count of a nonzero UBig (its lowest set-bit position).
 fn trailing_zeros(x: &UBig) -> usize {
-    let bytes = x.to_le_bytes();
+    let bytes = x.to_le_bytes_stack();
     let mut tz = 0usize;
-    for &byte in &bytes {
+    for &byte in bytes {
         if byte == 0 {
             tz += 8;
         } else {
@@ -76,7 +101,7 @@ fn trailing_zeros(x: &UBig) -> usize {
 
 /// `Some(n)` if `x` fits a `usize`.
 fn ubig_usize(x: &UBig) -> Option<usize> {
-    let bytes = x.to_le_bytes();
+    let bytes = x.to_le_bytes_stack();
     if bytes.len() > std::mem::size_of::<usize>() {
         return None;
     }
@@ -109,7 +134,12 @@ fn flop(stack: &mut NockStack, mut list: Noun, space: &NounSpace) -> JetResult<N
 ///
 /// As in Vere's `u3qc_swp`, the bloq `a` must be a cat (direct) under the word
 /// size; anything larger would demand an absurd allocation, so we `Punt` and
-/// let the (unreachable in practice) Nock handle it.
+/// let the (unreachable in practice) Nock handle it. We cap `bloq` well below
+/// the word size: `rip`/`rep` work in `2^bloq`-bit blocks, so even a tiny `b`
+/// forces a `2^bloq`-bit allocation (dwarf's `swp(28, 5)` NockStack-OOM). A real
+/// `+swp` never uses a block wider than a few dozen bits; `bloq >= 20` (a 1-Mib
+/// block) is already far past any legitimate use, so we Punt there.
+const SWP_BLOQ_MAX: usize = 20;
 pub fn jet_swp(context: &mut Context, subject: Noun) -> Result {
     let space = context.stack.noun_space();
     let sam = slot(subject, 6, &space)?;
@@ -120,7 +150,7 @@ pub fn jet_swp(context: &mut Context, subject: Noun) -> Result {
         .map_err(|_| JetErr::Punt)?
         .as_u64()
         .map_err(|_| JetErr::Punt)? as usize;
-    if bloq >= 32 {
+    if bloq >= SWP_BLOQ_MAX {
         return Err(JetErr::Punt);
     }
     let b: Atom = slot(sam, 3, &space)?.as_atom().map_err(|_| JetErr::Punt)?;
@@ -147,6 +177,17 @@ pub fn jet_pow(context: &mut Context, subject: Noun) -> Result {
 
     let stack = &mut context.stack;
     let base = a.in_space(&space).as_ubig(stack);
+    // Cap the result size: `a^b` has ~`bit_len(a) * b` bits. Without a guard a
+    // modest sample like `(pow 2 2^36)` asks for a gibibyte-scale atom and aborts
+    // the NockStack (dwarf's `pow` OOM). Punt past ~128 Mib of output and let the
+    // Nock run it — which, for a genuinely that-large power, also fails, but in
+    // the kernel's own accounting rather than as a jet-induced process abort.
+    // (`bit_len(a) <= 1` means base 0 or 1: the result is 0/1, never large.)
+    const POW_BITS_MAX: u128 = 1 << 27;
+    let base_bits = base.bit_len();
+    if base_bits > 1 && (base_bits as u128).saturating_mul(exp as u128) > POW_BITS_MAX {
+        return Err(JetErr::Punt);
+    }
     let res = base.pow_stack(stack, exp);
     Ok(Atom::from_ubig(stack, &res).as_noun())
 }
@@ -205,27 +246,35 @@ pub fn jet_aor(context: &mut Context, subject: Noun) -> Result {
 pub fn jet_mat(context: &mut Context, subject: Noun) -> Result {
     let space = context.stack.noun_space();
     let a = slot(subject, 6, &space)?.as_atom().map_err(|_| JetErr::Punt)?;
-    let a_big = { UBig::from_le_bytes(a.in_space(&space).as_ne_bytes()) };
+    let stack = &mut context.stack;
+    let a_big = UBig::from_le_bytes_stack(stack, a.in_space(&space).as_ne_bytes());
 
-    if a_big == UBig::from(0u8) {
-        return Ok(T(&mut context.stack, &[D(1), D(1)]));
+    if a_big.bit_len() == 0 {
+        return Ok(T(stack, &[D(1), D(1)]));
     }
 
     let b = a_big.bit_len() as u64; // (met 0 a)
     let c = (64 - b.leading_zeros()) as usize; // (met 0 b)
     let u = c - 1;
 
-    let w = UBig::from(1u8) << c; // (bex c)
-    let x = low_bits(&UBig::from(b), u); // (end [0 (dec c)] b)
-    let y = &a_big << u; // (lsh [0 (dec c)] a)
-    let z = x ^ y; // (mix ..)
-                   // (cat 0 w z): w occupies bits [0..c], z starts above met(0,w)=c+1
-    let q = &w | (&z << (c + 1));
+    // w = (bex c): a single bit at position c.
+    let one = UBig::from_unsigned_stack(stack, 1u64);
+    let w = UBig::shl_stack(stack, one, c);
+    // x = (end [0 (dec c)] b): the low `u` bits of `b`.
+    let b_big = UBig::from_unsigned_stack(stack, b);
+    let x = low_bits(stack, &b_big, u);
+    // y = (lsh [0 (dec c)] a): `a` shifted up by `u`, so its low `u` bits are 0.
+    let y = UBig::shl_ref_stack(stack, &a_big, u);
+    // z = (mix x y): x occupies bits [0,u), y bits [u,..) — disjoint, so mix == add.
+    let z = UBig::add_stack(stack, x, y);
+    // (cat 0 w z): w occupies bit c, z starts at bit c+1 — disjoint, so cat == add.
+    let z_hi = UBig::shl_stack(stack, z, c + 1);
+    let q = UBig::add_stack(stack, w, z_hi);
 
     let p = 2 * (c as u64) + b; // (add (add c c) b)
-    let p_noun = Atom::new(&mut context.stack, p).as_noun();
-    let q_noun = ubig_noun(&mut context.stack, &q);
-    Ok(T(&mut context.stack, &[p_noun, q_noun]))
+    let p_noun = Atom::new(stack, p).as_noun();
+    let q_noun = ubig_noun(stack, &q);
+    Ok(T(stack, &[p_noun, q_noun]))
 }
 
 /// `+rub`: jam length-decode — read a length-prefixed atom from bitstream `b`
@@ -241,32 +290,40 @@ pub fn jet_rub(context: &mut Context, subject: Noun) -> Result {
         .as_u64()
         .map_err(|_| JetErr::Punt)? as usize;
     let b_atom = slot(sam, 3, &space)?.as_atom().map_err(|_| JetErr::Punt)?;
-    let b_big = { UBig::from_le_bytes(b_atom.in_space(&space).as_ne_bytes()) };
+    let stack = &mut context.stack;
+    let b_big = UBig::from_le_bytes_stack(stack, b_atom.in_space(&space).as_ne_bytes());
 
     // Count leading zeros from bit `a` to the first 1 bit. If none exists at or
     // above `a`, rub would read past the stream and crash — Punt to the Nock.
-    let shifted = &b_big >> a;
-    if shifted == UBig::from(0u8) {
+    let shifted = UBig::shr_ref_stack(stack, &b_big, a);
+    if shifted.bit_len() == 0 {
         return Err(JetErr::Punt);
     }
     let c = trailing_zeros(&shifted); // zeros from `a` to the terminator
     if c == 0 {
         // terminator at bit `a`: the zero-length encoding
-        return Ok(T(&mut context.stack, &[D(1), D(0)]));
+        return Ok(T(stack, &[D(1), D(0)]));
     }
     let d = a + c + 1; // bit after the terminator
     let cm1 = c - 1;
 
-    let z = cut_bits(&b_big, d, cm1); // (cut 0 [d (dec c)] b)
-    let e_big = (UBig::from(1u8) << cm1) + z; // (add (bex (dec c)) z)
+    let z = cut_bits(stack, &b_big, d, cm1); // (cut 0 [d (dec c)] b)
+    // e_big = (add (bex (dec c)) z): bex's bit is at cm1, z < 2^cm1 — disjoint, add == or.
+    let one = UBig::from_unsigned_stack(stack, 1u64);
+    let bex = UBig::shl_stack(stack, one, cm1);
+    let e_big = UBig::add_stack(stack, bex, z);
+    // `cut_bits` below caps a width that exceeds the source's bit length, so an
+    // `e` that fits `usize` but dwarfs `b` no longer materializes a giant mask;
+    // but a non-`usize` `e` still can't index a cut, so Punt there.
     let e = ubig_usize(&e_big).ok_or(JetErr::Punt)?;
 
-    let p = UBig::from(2u64 * c as u64) + &e_big; // (add (add c c) e)
-    let q = cut_bits(&b_big, d + cm1, e); // (cut 0 [(add d (dec c)) e] b)
+    let two_c = UBig::from_unsigned_stack(stack, 2u64 * c as u64);
+    let p = UBig::add_stack(stack, two_c, e_big); // (add (add c c) e)
+    let q = cut_bits(stack, &b_big, d + cm1, e); // (cut 0 [(add d (dec c)) e] b)
 
-    let p_noun = ubig_noun(&mut context.stack, &p);
-    let q_noun = ubig_noun(&mut context.stack, &q);
-    Ok(T(&mut context.stack, &[p_noun, q_noun]))
+    let p_noun = ubig_noun(stack, &p);
+    let q_noun = ubig_noun(stack, &q);
+    Ok(T(stack, &[p_noun, q_noun]))
 }
 
 /// `+muk`: standard murmur3 — `MurmurHash3_x86_32(key padded to `len` bytes,
@@ -420,5 +477,42 @@ mod tests {
         // swp of 0 is 0.
         let sam3 = T(&mut c.stack, &[D(2), D(0)]);
         assert_jet(c, jet_swp, sam3, D(0));
+    }
+
+    // --- regression tests for the memory-safety fixes -----------------------
+
+    #[test]
+    fn test_rub_no_alloc_bomb() {
+        let c = &mut init_context();
+        // b = 2^40 at offset 0. A naive `(1<<e)-1` mask would allocate a ~2^39-bit
+        // (≈68 GiB) value to extract bits that are all zero (dwarf's rub bomb).
+        // With the byte-truncating cut the extracted value is just 0, returned
+        // instantly.
+        let sam = T(&mut c.stack, &[D(0), D(1u64 << 40)]);
+        let subj = T(&mut c.stack, &[D(0), sam, D(0)]);
+        let got = jet_rub(c, subj).unwrap();
+        let q = slot(got, 3, &c.stack.noun_space()).unwrap();
+        assert!(unsafe { q.raw_equals(&D(0)) }, "rub q must be 0, no giant mask");
+    }
+
+    #[test]
+    fn test_pow_caps_huge_exponent() {
+        let c = &mut init_context();
+        // 2^(2^36): output ~2^37 bits, far over the cap → Punt (not a NockStack OOM).
+        let sam = T(&mut c.stack, &[D(2), D(1u64 << 36)]);
+        let subj = T(&mut c.stack, &[D(0), sam, D(0)]);
+        assert!(matches!(jet_pow(c, subj), Err(JetErr::Punt)));
+        // a small power still jets.
+        let ok = T(&mut c.stack, &[D(2), D(10)]);
+        assert_jet(c, jet_pow, ok, D(1024));
+    }
+
+    #[test]
+    fn test_swp_caps_huge_bloq() {
+        let c = &mut init_context();
+        // bloq 28 forces a 2^28-bit block even for a tiny `b` → Punt.
+        let sam = T(&mut c.stack, &[D(28), D(5)]);
+        let subj = T(&mut c.stack, &[D(0), sam, D(0)]);
+        assert!(matches!(jet_swp(c, subj), Err(JetErr::Punt)));
     }
 }

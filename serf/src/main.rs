@@ -35,6 +35,33 @@ use nockvm::noun::{Atom, Noun, D, T};
 use nockvm::serialization::{cue, jam};
 
 fn main() {
+    // Run everything on a worker thread with a large (1 GiB) native stack.
+    //
+    // Several jets recurse once per tree level (the `+by`/`+in` treap ops in
+    // map.rs/set.rs, `look`/`loot` in ut.rs). For a well-formed, mug-ordered
+    // treap the depth is ~log(n), but an adversary who grinds keys into a
+    // mor-descending chain can force a near-linear treap. On the default 8 MiB
+    // thread stack a deep-enough recursion (dwarf's audit reproduced this around
+    // ~100k nodes) overflows the native stack and the OS aborts the serf — a
+    // crash a hostile event could trigger, and worse, replay on restart. The
+    // nockvm interpreter itself drives Nock on the loom (not the native stack),
+    // so only these native-recursive jets are exposed; a 1 GiB stack lifts the
+    // abort threshold to the ~millions-of-nodes range, which no realistic event
+    // reaches. (A stack overflow is a hard fault, not a Rust panic, so it cannot
+    // be caught with `catch_unwind`; enlarging the stack is the real mitigation.)
+    const WORKER_STACK: usize = 1 << 30; // 1 GiB
+    let worker = std::thread::Builder::new()
+        .name("eris-serf".into())
+        .stack_size(WORKER_STACK)
+        .spawn(real_main)
+        .expect("spawn eris-serf worker thread");
+    // Propagate a worker panic as a non-zero exit (join carries the unwind).
+    if worker.join().is_err() {
+        std::process::exit(101);
+    }
+}
+
+fn real_main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("eval") => {

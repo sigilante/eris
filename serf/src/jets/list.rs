@@ -12,7 +12,7 @@
 // `super::eris_hot_state`) so nockvm's own dashboard stays unpatched; pinned to
 // Hoon kelvin 138.
 //
-// Arms: `welp slag need reel skim skip skid murn lien sort`. All are plain
+// Arms: `welp slag need mate reel skim skip skid murn lien sort`. All are plain
 // gates in chapter `two`, so each jet reads its sample at axis 6 and (for the
 // binary gates) the two arguments at axes 2 and 3 of the sample. The
 // gate-slamming arms (`reel skim skip skid murn lien sort`) apply the sample
@@ -20,6 +20,8 @@
 //
 // An invalid loobean out of a slammed predicate (anything but `%.y`/`%.n`)
 // returns `JetErr::Punt`, falling back to the Nock — never a silent guess.
+// Likewise an ill-typed (non-`~`-terminated) list argument Punts, since hoon's
+// `?~` would crash on it rather than treat the stray atom as the end.
 
 use nockvm::interpreter::Context;
 use nockvm::jets::util::{slam, slot};
@@ -57,8 +59,22 @@ fn loob(r: Noun) -> JetResult<bool> {
     }
 }
 
-/// Collect the elements of a (possibly improper) list head-first. Stops at the
-/// first atom, exactly as hoon's `?~` terminates a list walk.
+/// A list terminator must be `~` (the atom 0). Hoon's `?~` tests *only* for `~`,
+/// so a list whose tail is a non-zero atom is ill-typed: `?~` would read it as a
+/// cell `[i t]` and crash on the atom. Our loops stop at any atom, so we check
+/// the terminator here and `Punt` on a non-`~` atom, letting the Nock raise that
+/// crash rather than returning a value Nock never would (dwarf's divergence).
+#[inline(always)]
+fn end_ok(cur: Noun) -> JetResult<()> {
+    if unsafe { cur.raw_equals(&D(0)) } {
+        Ok(())
+    } else {
+        Err(JetErr::Punt)
+    }
+}
+
+/// Collect the elements of a list head-first, stopping at the `~` terminator.
+/// Punts on an ill-typed (non-`~` atom) tail, as hoon's `?~` would crash there.
 fn elements(list: Noun, space: &NounSpace) -> JetResult<Vec<Noun>> {
     let mut items = Vec::new();
     let mut cur = list;
@@ -66,6 +82,7 @@ fn elements(list: Noun, space: &NounSpace) -> JetResult<Vec<Noun>> {
         items.push(slot(cur, 2, space)?);
         cur = slot(cur, 3, space)?;
     }
+    end_ok(cur)?;
     Ok(items)
 }
 
@@ -115,6 +132,9 @@ pub fn jet_slag(context: &mut Context, subject: Noun) -> Result {
     let mut k = n;
     while k != 0 {
         if list.is_atom() {
+            // hoon `?~ b ~`: running out of list yields `~`, but a non-`~` atom
+            // tail with elements still to drop is where `?~` crashes — Punt.
+            end_ok(list)?;
             return Ok(D(0));
         }
         list = slot(list, 3, &space)?;
@@ -144,10 +164,12 @@ pub fn jet_mate(context: &mut Context, subject: Noun) -> Result {
     let a = slot(sam, 2, &space)?;
     let b = slot(sam, 3, &space)?;
     if b.is_atom() {
-        return Ok(a); // b is ~
+        end_ok(b)?; // ~ → a; a non-`~` atom unit is ill-typed, Punt
+        return Ok(a);
     }
     if a.is_atom() {
-        return Ok(b); // a is ~
+        end_ok(a)?;
+        return Ok(b);
     }
     // both [~ u]: compare the values (axis 3 of each unit).
     let ua = slot(a, 3, &space)?;
@@ -198,6 +220,7 @@ fn filter(context: &mut Context, subject: Noun, keep_on_yes: bool) -> Result {
             kept.push(elem);
         }
     }
+    end_ok(list)?;
     Ok(build(&mut context.stack, &kept, D(0)))
 }
 
@@ -229,6 +252,7 @@ pub fn jet_skid(context: &mut Context, subject: Noun) -> Result {
             no.push(elem);
         }
     }
+    end_ok(list)?;
     let p = build(&mut context.stack, &yes, D(0));
     let q = build(&mut context.stack, &no, D(0));
     Ok(T(&mut context.stack, &[p, q]))
@@ -251,6 +275,7 @@ pub fn jet_murn(context: &mut Context, subject: Noun) -> Result {
             kept.push(slot(unit, 3, &space)?);
         }
     }
+    end_ok(list)?;
     Ok(build(&mut context.stack, &kept, D(0)))
 }
 
@@ -268,6 +293,7 @@ pub fn jet_lien(context: &mut Context, subject: Noun) -> Result {
             return Ok(YES);
         }
     }
+    end_ok(list)?;
     Ok(NO)
 }
 
@@ -529,5 +555,18 @@ mod tests {
         let sam2 = T(&mut c.stack, &[a2, all_no]);
         let want2 = list(&mut c.stack, &[1, 2, 3, 4]);
         assert_jet(c, jet_sort, sam2, want2);
+    }
+
+    #[test]
+    fn test_improper_tail_punts() {
+        let c = &mut init_context();
+        // a = [1 2 . 5]: a list whose tail is the non-`~` atom 5. hoon's `?~`
+        // would crash reading 5 as a cell, so `+welp` must Punt, not return a
+        // value Nock never produces (dwarf's elements divergence).
+        let inner = T(&mut c.stack, &[D(2), D(5)]); // tail 5 is non-~
+        let a = T(&mut c.stack, &[D(1), inner]);
+        let sam = T(&mut c.stack, &[a, D(0)]);
+        let subj = T(&mut c.stack, &[D(0), sam, D(0)]);
+        assert!(matches!(jet_welp(c, subj), Err(JetErr::Punt)));
     }
 }

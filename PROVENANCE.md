@@ -133,15 +133,23 @@ is **never patched**. All pinned to Hoon **k138** (`K_138`), the pill's kelvin.
 - **`flot.rs` — the `@r` IEEE-754 float doors** (`+rh`/`+rs`/`+rd`/`+rq`, ten
   arms each: `add sub mul div sqt lth lte equ gte gth`; `fma` stays Nock). A
   **verbatim import** of the numerics repo's `hoon-float-jets` crate (branch
-  `sigilante/nockapp-float-jets`), bit-identical to Vere's Berkeley-SoftFloat C
-  jets (proven by that project's Hoon-vector tests). It pulls the external
+  `sigilante/nockapp-float-jets`, commit `8afdeb5`), which that project's
+  Hoon-vector tests validate against hoon-138's `++ff`/`++fl`. It matches Vere's
+  Berkeley-SoftFloat C jets with **one known, documented divergence**: hoon's
+  `++fl` overflows to infinity in rounding modes where IEEE 754 (and sdfloat)
+  saturate to the largest finite value (`%z`, `%d` positive, `%u` negative), so
+  those overflowing inputs mismatch the raw Nock until urbit/urbit#7426 lands.
+  This is a userspace numeric edge *identical to Vere* (no real-peer split), not
+  a soundness gap, but the jets are therefore not bit-identical to the Nock for
+  that one case; see the `flot.rs` header. It pulls the external
   **`sdfloat`** crate (`github.com/sigilante/RustFloat`, rev `f7d449c`, pure-Rust
   SoftFloat) — the one Eris dependency fetched from outside the vendored
-  submodules, rev-pinned in `serf/Cargo.toml`. Rounding mode at axis 30; chapter
-  `tri`, path `[k138 one two tri <door> <arm>]`.
+  submodules, rev-pinned in `serf/Cargo.toml`; its bit-exactness beyond the #7426
+  case rests on that upstream crate, not on anything in this tree. Rounding mode
+  at axis 30; chapter `tri`, path `[k138 one two tri <door> <arm>]`.
 - **`ut.rs` — the `+ut` type helpers** (chapter `pen`): `cell face core` (type
   constructors), `cons comb` (formula folding/compose), `flip flan flor`
-  (loobean-formula logic), `fitz` (kelvin compat), `fork` (union type, reusing
+  (loobean-formula logic), `fitz` (aura-nesting compat, NOT kelvin), `fork` (union type, reusing
   our `+in` `set::set_uni`/`set_put`), and `look loot` (resolve a name in a
   type's symbol table, recursive treap walks with a ported `+peg` over ibig).
   Ported from Vere `f/*.c`; path `[k138 one two tri qua pen <arm>]`. These fire
